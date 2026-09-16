@@ -1,61 +1,80 @@
 ---
 name: webwork-answer-entry
-description: "Solve and enter answers for WeBWorK problem sets in any course (math, statistics, physics) on any WeBWorK install. Use whenever the user points at WeBWorK and wants problems worked, answers typed in, or their own work checked — including sets where the user supplies no answers and Claude must solve, self-verify, and submit. Covers solution procedures and their traps, self-verification, MathQuill input syntax, which browser methods work on those fields, reading a whole set efficiently, and preserving attempts."
+description: "Solve and enter answers for online homework in WeBWorK or Top Hat (math, statistics, physics). Use whenever the user points at either platform and wants problems worked, answers entered, or their own work checked."
 ---
 
-# WeBWorK Problem Sets
+# Online Problem Sets (WeBWorK, Top Hat)
 
-Two facts drive everything:
+**Identify the platform first** from the open tab: a webwork2 URL → everything below applies. `app.tophat.com` → the shared sections (modes, image loss, self-verification, solution procedures) apply, and entry mechanics come from the **Top Hat** section at the end.
 
-1. Answer boxes are **MathQuill live-math editors**, not text inputs. They rewrite input as it is typed and silently ignore programmatic fill.
-2. Submissions are **metered** (typically 12 attempts, partial credit). A blank or wrong submission burns one. **Preview is free and unlimited** — the most useful property of the system.
+For WeBWorK, two facts drive everything:
+
+1. Typed answer boxes are **MathQuill live-math editors**, not text inputs. They rewrite input as it is typed and silently ignore programmatic fill.
+2. Submissions are **metered** (often 3–12 attempts; extra-credit sets may be unlimited). A blank or wrong submission burns one. **Preview is free and unlimited.**
+
+Because attempts are the scarce resource: **a timed-out or failed tool call may still have executed.** Screenshot and check the page state before retrying anything that submits — a blind retry can burn a second attempt or double-submit.
 
 ## Before you start
 
-Setup, before any problem is touched. Claude should confirm all four.
+Setup, before any problem is touched.
 
 ### A browser is required
 
-This skill drives a real browser: it reads problems off the rendered page
-and types into live math fields. There is no text-only path. Either
-browser works and everything below applies identically to both:
+This skill drives a real browser: it reads problems off the rendered page and
+types into live widgets. There is no text-only path. Either browser works —
+measured no speed difference, and they keep **separate logins**:
 
-- **The Claude desktop app's built-in browser** — a browser pane inside
-  the app, nothing to install. Use this if you are unsure which you have.
-- **Claude in Chrome** — the extension, driving your own Chrome.
+- **Claude in Chrome** — the extension, driving your own Chrome. Existing D2L
+  or WeBWorK sessions are already live in it.
+- **The Claude desktop app's built-in browser** — a pane inside the app,
+  nothing to install; keeps its own profile across sessions.
 
-Which of these is available depends on your plan and setup. Use whichever
-the session has; if neither is available, say so and stop rather than
-attempting the set blind.
+If neither is available, say so and stop rather than working the set blind.
+
+### Site permission is the first thing that will stop you (Chrome)
+
+Claude in Chrome gates access per site. The first `navigate` to a new LMS or
+WeBWorK host returns a permission stop, not a page. This is normal and
+one-time per site: tell the user to allow the site in the extension, wait,
+and retry. Do not treat it as a broken tool or work around it.
 
 ### Getting to the set
 
-Claude cannot guess a course's WeBWorK address. Give it one of:
+Claude cannot guess a course's address. Ask for either:
 
-- **a direct link to the set** — fastest by a wide margin; paste the URL
-  of the page you are looking at
-- **your LMS and course** (D2L, Canvas, Blackboard) and let Claude
-  navigate through to WeBWorK
+- **a direct link** — paste the URL of the set or problem page (fastest)
+- **the LMS and course** (D2L, Canvas, Blackboard) and navigate through
+
+WeBWorK problem pages have predictable URLs once you have one:
+`/<course>/<Set>/<n>/`, set page `/<course>/<Set>/`.
 
 ### Signing in is the user's job
 
-Claude has no credentials and will not ask for them.
-
-- **Built-in browser** — keeps a persistent profile across desktop-app
-  sessions, so a sign-in carries over. The first run on a new machine
-  needs a real login; later runs usually open straight to the portal.
-- **Chrome** — uses your normal profile, so an existing D2L or WeBWorK
-  session is already live.
-
-A page that comes back as a login screen is the signal to hand the browser
-back: the user signs in, then tells Claude to continue. SSO redirect
-chains and 2FA prompts belong to the user.
+Claude has no credentials and will not ask for them. A page that comes back as
+a login screen is the signal to hand the browser back: the user signs in, then
+says continue. SSO redirect chains and 2FA prompts belong to the user.
 
 ### Name the mode
 
-Say "enter these answers," "check my work," or "do the whole set." Solve
-mode submits answers the user has not reviewed, so Claude confirms that
-mode rather than inferring it.
+"Enter these answers," "check my work," or "do the whole set." Solve mode
+submits work the user has not reviewed — confirm that mode rather than
+inferring it.
+
+### Model and effort
+
+Wall-clock is dominated by browser round-trips, not thinking, and this file
+carries the procedure — so **low effort is right for nearly all of it**. A
+mid-tier model handles routine sets. Reach for a stronger model on sets that
+are graph-heavy, conceptually fussy, or low on attempts, where reading a
+close call off a mosaic plot or boxplot is the real work.
+
+### First run in a new course
+
+Prove the path before spending attempts. Either run **Check** mode against a
+problem the user has already solved, or enter problem 1 alone and confirm its
+score before touching the rest. A past-due set is a safe place to test entry
+mechanics — but it often displays the answers, so it proves nothing about
+solving.
 
 ## Pick the mode first
 
@@ -63,195 +82,190 @@ mode rather than inferring it.
 |---|---|
 | User supplies their answers | **Enter** — type them, confirm the on-screen problem matches, submit |
 | User wants their work checked | **Check** — solve independently *before* reading their answers, then diff |
-| User supplies nothing | **Solve** — work everything, self-verify, fill, preview, submit |
+| User supplies nothing | **Solve** — work everything, self-verify, fill, submit |
 
-In **Solve** mode, show the worked solution before submitting — the actual steps, not just the answer. In **Check** mode, solve first and read their answers second; reading theirs first guarantees anchoring and rubber-stamping. A disagreement means stop: enter neither, show both derivations, let the user adjudicate.
+In **Solve** mode, show the worked reasoning for each problem — the actual steps, not just the answer. In **Check** mode, solve first and read their answers second. A disagreement means stop: enter neither, show both derivations, let the user adjudicate.
 
-## Working a full set
+"Complete all open assignments": load the course's assignment list, then each open set's page (`/<course>/<Set>/`) to see per-problem status; skip sets already at 100%; do the earliest-due set first.
 
-### Reading the set
+## Working a set: read all, solve all, then enter (default)
 
-Try the hardcopy PDF first — the set page may offer "Download Hardcopy for Current Set." It renders the whole set including figures, collapsing 20 page loads into one.
+**This is the default way to work a WeBWorK set.** Read every problem first,
+solve the whole set at once, then go back and enter one problem at a time.
+Measured: 9-problem set in ~4 min this way vs ~13 min problem-by-problem, all
+first-try correct in both. Solving in one pass is also more accurate than
+solving between page loads — shared setups and carry-through parts are visible
+at once.
 
-**Treat it as opportunistic, never required.** Instructors disable it per course or set, gateway sets restrict it, and server-side PDF generation can simply be broken. **One attempt — if the link is absent or generation fails, fall back to per-problem reads silently and don't mention it again.** Hunting for a missing PDF costs more than never trying.
+1. **Bulk text read — one batch.** Problem pages have direct URLs `/<course>/<Set>/<n>/`. One `browser_batch` of `navigate` + `get_page_text` × every problem. This replaces the hardcopy PDF: downloading it needs the user's permission plus a connected folder to read it, and gives no widget info.
+2. **Solve everything text-solvable immediately**; compute numerics with a short python call (one call for the whole set).
+3. **Screenshot only what needs eyes** — one batch of `navigate` + `screenshot` for problems whose text references a plot/table image, plus scroll-down screenshots where a Part 2 figure or option list sits below the fold. `zoom` to read boxplot quartiles or bar heights.
+4. **Report answers** (needs-review first), then **enter one problem per batch**: fill → click Submit → `find` "score received message" → `navigate` to next problem → `find` its inputs. Each batch both confirms the last problem and sets up the next.
+5. Finish on the set page (`get_page_text`) to confirm every status reads 100%.
 
-When using the PDF: spot-check two problems against live pages the first time on a new course, since randomization is per-student. And note the PDF shows the **mathematics but not the input widget** — it won't reveal that problem 17 is two dropdowns while problem 18 is three MathQuill boxes. Solve from the PDF, enter from the live pages.
+**Canary still applies:** confirm problem 1's score before trusting a fill method across the set.
+
+### Falling back to problem-by-problem
+
+The older serial method — read one problem, solve it, enter it, submit, move on
+— is the fallback, not the default. Use it when:
+
+- **the platform is Top Hat** — one question per page, sidebar navigation, no
+  predictable URLs, so there is nothing to bulk-read
+- **problem URLs aren't predictable** on this install, or the set page won't
+  enumerate them
+- **the canary fails** — problem 1's fill method didn't land; fix the method
+  serially before scaling it across the set
+- **the set is almost entirely figures or multi-part** — the bulk text read
+  returns little, so batching saves nothing
+
+Falling back costs time, not accuracy. Prefer it over guessing.
 
 ### Images are lost silently
 
-`get_page_text` **drops images entirely** and gives no sign it did. A graph-matching problem comes back as bare labels — "(i) (ii) (iii)" — which looks like clean output and contains nothing. Never assume a text read was complete.
+`get_page_text` **drops images entirely** and gives no sign. A graph problem comes back as bare labels or just the stem. Text mentioning "below", "shown", "plot", "histogram", "boxplot", or "clicking on any image" means screenshot it. Also: option lists may be truncated or padded in text (e.g. a select offering A–H while only A–F are printed) — screenshot when options look incomplete. Default graph-interpretation problems to *needs review* unless unambiguous.
 
-**`read_page` is the detector**, because the accessibility tree enumerates `<img>` elements. Any problem with images in its body needs a screenshot. Use "click to enlarge" before judging a graph rather than squinting at a thumbnail in a 6-up grid, and default graph-identification problems to *needs review* in confidence tagging.
+## Self-verification
 
-### Order of operations
+When no answer key exists, Claude is the only check on Claude. On Top Hat, correct answers are hidden even after submission, so it is the *only* check ever. **WeBWorK Preview validates syntax, never correctness.**
 
-Bulk-read and solve the whole set in one pass, then enter. But **work problem 1 fully serially first — read, fill, preview, submit, confirm the result — before scaling up.**
+### Protocol
 
-That first result is a canary for the entire method. Batching amplifies systematic errors: a broken fill technique caught on problem 1 costs one attempt; the same mistake bulk-applied to twenty problems costs twenty.
+Run all five on every self-derived computational answer:
 
-### Speed rules
+1. **Substitute back into the original** — not the simplified form.
+2. **Domain-check every candidate** (log arguments $>0$, even radicands $\ge 0$, denominators $\ne 0$).
+3. **Re-derive by a second route.** One derivation that re-reads itself is worth nothing.
+4. **Numeric evaluation** for plausibility.
+5. **Count expected solutions.**
 
-**Speculative fills — single-answer problems only.** Skip the reconnaissance screenshot and go straight to click-and-type at the predictable position (box near (303, 267), Preview near (274, 344) on a fresh page). A miss lands in empty space, preview shows a blank box, and retrying costs nothing.
-
-**Never speculate on multi-field problems.** There a missed click doesn't hit empty space — it hits a *neighboring filled cell* and appends garbage, and cleanup costs more than the screenshot saved.
-
-**Do not batch multiple field-fills in tables.** This was tried repeatedly and failed more often than it worked: the page scrolls mid-batch, later clicks land a row off, and text lands in already-filled cells. Recovery consistently cost more calls than the batching saved, and there is no way to predict in advance which way a given table will go. One field per call inside tables, verified.
-
-## Solve mode: unattended sets
-
-When no answer key exists, Claude is the only check on Claude. The protocol below is the entire safety margin.
-
-**Work the set to filled-and-previewed, then submit.** 
-
-**Preview validates syntax, never correctness.** A clean preview means WeBWorK parsed the expression. It says nothing about whether the math is right. Never report a previewed answer as verified.
-
-### Self-verification protocol
-
-Run all five on every self-derived answer:
-
-1. **Substitute back into the original** — not the simplified form. Catches extraneous roots.
-2. **Domain-check every candidate** against the original: log arguments $>0$, even radicands $\ge 0$, denominators $\ne 0$. Reject failures explicitly and say which.
-3. **Re-derive by a second route.** Factoring vs. quadratic formula; algebra vs. graph; test point vs. sign chart. Two independent routes agreeing is the bar — one derivation that re-reads itself is worth nothing.
-4. **Numeric evaluation.** Compute the exact form as a decimal and confirm plausibility.
-5. **Count expected solutions.** A quadratic has two; $\sin x = c$ on $[0,2\pi)$ has two. A mismatch means something was dropped.
+Conceptual items (variable types, study design, parameter vs statistic) can't run all five: check against the textbook definition and name any convention the course might set differently.
 
 ### Confidence gating
 
-- **Solid** — two routes agree, domain checked, numerics sane, count matches.
-- **Needs review** — anything else: routes disagreed, only one route existed, unfamiliar problem type, ambiguous edge case, graph interpretation, or an answer depending on a convention the course may set differently.
+- **Solid** — routes agree / definition unambiguous.
+- **Needs review** — anything else: graph interpretation, convention-dependent answers, or a matching item whose "right" option isn't literally offered (then pick the option consistent with the other matches — e.g. population = the group the parameter describes).
 
-Report "needs review" problems **first**, with the specific doubt named. Never bury uncertainty inside a list of confident-looking answers.
-
-Per problem, report: the answer, a one-line derivation, and the tag.
+Report "needs review" problems **first**, with the doubt named.
 
 ## Read the actual problem
 
-WeBWorK randomizes coefficients per student. Notes, a classmate's answer, or a worked example may not match what is on screen. Always read the rendered statement; in Enter mode, confirm it matches the user's answer and say so if it does not.
+WeBWorK randomizes values per student; Top Hat may pre-shuffle drag-and-drop options. Always read the rendered statement and the widget's current state.
 
 ## Solution procedures
 
-Claude knows the mathematics. What follows is structure and the traps that produce confidently wrong answers.
-
 ### Inequalities (test-point method)
 
-1. Move everything to one side: a single expression compared to $0$. **Never cross-multiply by a variable expression** — its sign is unknown and the inequality may flip.
-2. Boundary values are numerator zeros **and** denominator zeros. Both.
-3. Order them; they partition the line.
-4. Test one point per interval **numerically in the original**. Do not reason about signs abstractly, and **do not assume signs alternate** — they do not flip across an even-multiplicity root like $(x-2)^2$.
-5. Endpoints: include numerator zeros only for $\le$ or $\ge$. **Never include a point where the expression is undefined**, whatever the relation.
-6. **Holes:** a factor cancelling top and bottom is still excluded. $\frac{(x-1)(x+1)}{(x-1)(x-3)}$ is undefined at $x=1$ even though it simplifies away.
+1. One side vs $0$. **Never cross-multiply by a variable expression.**
+2. Boundaries = numerator zeros **and** denominator zeros.
+3. Test one point per interval **numerically in the original**; don't assume signs alternate (even-multiplicity roots).
+4. Include numerator zeros only for $\le$/$\ge$; **never** include undefined points. Cancelled factors are still holes.
 
 ### Logarithmic and exponential equations
 
-- Combine to a single log, then exponentiate. **Extraneous roots are the norm** — every candidate must satisfy the original domain. $\ln x + \ln(x-3) = \ln 10$ requires $x>3$, killing the $-2$ root.
-- Same base both sides → equate exponents. Otherwise $a^{x}=b \Rightarrow x=\frac{\ln b}{\ln a}$, left exact.
+Combine, exponentiate, domain-check every candidate — extraneous roots are the norm. $a^{x}=b \Rightarrow x=\frac{\ln b}{\ln a}$, left exact.
 
 ### Absolute value
 
-$|A|=c$: solve $A=\pm c$; no solution if $c<0$. $|A|<c \Rightarrow -c<A<c$; $|A|>c \Rightarrow A<-c$ or $A>c$. Or run the test-point method on $|A|-c$, which is how WeBWorK often scaffolds it.
+$|A|=c$: $A=\pm c$ (none if $c<0$). $|A|<c \Rightarrow -c<A<c$; $|A|>c \Rightarrow A<-c$ or $A>c$.
 
 ### Inverse functions
 
-Swap and solve. A **restricted domain picks the branch**: $f(x)=x^2+1,\ x\ge0$ gives $f^{-1}=\sqrt{x-1}$, positive root only. Domain of $f^{-1}$ = range of $f$.
+Swap and solve; a restricted domain picks the branch. Domain of $f^{-1}$ = range of $f$.
 
 ### Trigonometry
 
-Exact values: reference angle, then quadrant sign, rationalized as the course does ($\tan\frac{5\pi}{6}=-\frac{\sqrt3}{3}$). Equations on an interval: find **every** solution in it, not just the principal one.
+Reference angle + quadrant sign, rationalized. Find **every** solution in the interval.
 
 ### Simplification and domain
 
-Simplifying often **enlarges** the domain, and WeBWorK asks about exactly that. The identity holds only where the *original* was defined: $\frac{1-\cos^2x}{\sin x}=\sin x$ requires $\sin x \ne 0$.
+Identities hold only where the *original* was defined.
 
 ### Graph identification
 
-Match on intercept, asymptote, and domain, not overall shape: $e^x$ through $(0,1)$ with a left horizontal asymptote; $\ln x$ through $(1,0)$ with a vertical asymptote at $0$; $\sqrt x$ from the origin, $x\ge0$ only.
+Match on intercept, asymptote, domain — not overall shape.
 
 ### Statistics courses
 
-Stats sets differ from algebra sets in three ways that matter:
+- **Decimals to stated precision; carry full precision, round only at the end.**
+- **Carry-through parts:** solve chained parts as one computation.
+- **Variable types:** yes/no or labels → nominal; ordered categories (low/medium/high, education level) → ordinal; measured or counted quantities → numerical. A sample size, a study's headline result ("42% lower risk"), or other single study-level number is **not a variable**.
+- **Parameter vs statistic:** known population value → parameter; value computed from the sample → statistic.
+- **Two-way tables:** marginal = row/col total ÷ grand total; joint = cell ÷ grand total; conditional = cell ÷ the *given* row/col total. **Base-rate / diagnostic tables** on a hypothetical 10,000: diseased = rate×10,000; TP = sensitivity×diseased; TN = specificity×healthy; fill the rest by subtraction. Enter unrounded cell values (e.g. 536.79). Raising the base rate raises P(disease | positive).
+- **Mosaic plots:** column **width** = that variable's marginal share (widest = most entries); segment **height within a column** = conditional share. Pick the plot whose columns are the variable you're conditioning on.
+- **Boxplots:** read Q1/median/Q3/whiskers/outliers per group; "proportion above x" follows from where x falls (above Q3 → <25%, above median → <50%). Match an unlabeled histogram to a group by its **min/max range and outliers** first, then peak location.
+- **SD vs a benchmark:** compare the benchmark with roughly range/4–range/6 of the bulk.
+- **Adding one value:** mean falls iff value < mean; recompute median as the new middle; SD rises iff |value − mean| is large relative to SD — just compute all candidates in python.
+- **Paired data:** mean of differences = difference of means; SD of differences ≠ difference of SDs.
+- **Shape and center:** the mean is pulled toward the long tail. "Symmetric" includes multimodal mirror-image shapes.
+- **Spread from dot plots:** all points at one value = zero; mass at both extremes = most.
+- **Confounders** must plausibly relate to both explanatory and response variables.
 
-- **Rounding replaces exactness.** The "exact unless told otherwise" rule below **flips** — stats problems want decimals to a stated precision. WeBWorK compares numerically with a tolerance (often 0.1% relative), so extra precision is usually safe, but rounding *intermediate* steps can push the final answer outside tolerance. **Carry full precision through, round only at the end.**
-- **Carry-through parts.** Part (a)'s standard error feeds (b)'s test statistic feeds (c)'s p-value. Solve the chain as one computation rather than re-entering rounded intermediates.
-- **Far more image-dependent.** Histograms, boxplots, scatterplots, regression output. The proportion of problems where text extraction silently loses everything is much higher than in algebra — check for images aggressively.
+### Answer form (WeBWorK)
 
-### Answer form
+Exact unless told otherwise (algebra); decimals to stated precision (stats); comma-separated lists; interval notation with `U`; `NONE`/`DNE` for empty sets.
 
-- **Exact unless told otherwise** (algebra); **decimals to stated precision** (stats).
-- Multiple solutions: comma-separated list. Intervals: interval notation, `U` for union.
-- Empty solution set: `NONE` (or `DNE` where the problem says so).
+## Entering answers in WeBWorK
 
-## Entering answers (MathQuill)
+### Widget → method (observed on webwork2 2.19)
 
-**Fill → preview → verify → submit.** Never submit without previewing, even for a single digit.
+| Widget | Method | Preview? |
+|---|---|---|
+| `<select>` dropdown | `form_input` with the option text | No |
+| Radio / checkbox | `form_input` with `true` on the ref from `find` | No |
+| MathQuill typed box | coordinate `left_click` → `type` | Yes if any fractions/radicals/intervals; optional for plain decimals |
+| Submit button | `left_click` by ref (from `find`) or by coordinate | — |
 
-### The arrow-out rule
+- **Never `form_input` a MathQuill box** — it submits blank and burns an attempt.
+- `find` returns dropdown/radio/checkbox refs in page order; option order matches the printed list. Refs are valid until the page reloads.
+- On pages mixing typed boxes and dropdowns, **type first, then `form_input`** (form_input can scroll the page).
 
-`/` opens a fraction and **the cursor stays in the denominator**. Everything typed afterward keeps going into it. Press `Right` to climb out first.
+### Typed boxes: batching
 
-| Intent | Type this |
-|---|---|
-| `-1/2, 3` | `-1/2` → `Right` → `,3` |
-| `-√3/2` | `-sqrt(3)` → `Right` → `/2` |
-| `π/6, 5π/6` | `pi/6` → `Right` → `,5pi/6` |
+- Plain-decimal fills of several boxes in one batch worked (including two 3×3 contingency tables filled bottom-up in one batch each) — rows don't resize for plain numbers. Screenshot once after the batch to verify every cell.
+- Still **one field per call** when entries contain fractions or radicals (rows grow and shift).
+- **Re-screenshot after any scroll** before clicking — the page can settle 10–20 px after scrolling, and after a tool timeout the viewport origin can shift (a screenshot came back 782 px tall with a white band). Clicks from a stale frame silently miss.
+- If a batch times out, its actions may still have run: screenshot and check state before retrying anything.
 
-Without it, `-1/2,3` becomes $-\frac{1}{2,3}$ and WeBWorK rejects it with *"Operands of '/' can't be lists."* `sqrt` behaves identically — the cursor stays inside the radical, so `-sqrt(3)/2` typed straight through puts the fraction *under* the radical.
+### MathQuill syntax
 
-No arrow-out needed when nothing follows: `(5x+2)/3`, `ln(12)/ln(5)`, `(ln(7)-1)/3`.
+- `/` leaves the cursor in the denominator; press `Right` before continuing (`-1/2` → `Right` → `,3`). Same for `sqrt`.
+- Infinity: `inf`, never `infinity`. `pi`, `sqrt`, `ln(`, `sin(` convert. `(` auto-closes; `U` for union.
+- Orange dot on the info button = bad parse; trust Preview's popup.
+- To clear a field, **reload the page**.
 
-### Other conversions
+### Multi-part problems
 
-- **Infinity: type `inf`, never `infinity`.** MathQuill converts `inf` to ∞ on sight, leaving `infinity` as `∞inity`.
-- `pi` → π, `sqrt` → √; `ln(`, `sin(` render as functions.
-- `(` auto-closes; `)` moves past it. `]` closes with a bracket, so `(-2,4]` works.
-- Union: `U`, as in `(-inf,-1]U(3,inf)`.
+Parts unlock on **Preview**, not Submit. Fill all parts, then submit once. Sign patterns must match the final answer.
 
-### Reading the parse
+### Confirming results
 
-An **orange dot on the info button** beside a field means the parse is wrong. Preview shows a *"You Entered"* popup with the parsed form and the error. Trust that over the rendered box — the box can look right while the parse is not.
+`find` "score received message" after submitting — returns "You received a score of N%" cheaply. `All of the answers are correct.` = done. `N of the questions remain unanswered.` = fill didn't land; change method. Finish on the set page for the status table.
 
-### Clearing a field
+## Top Hat
 
-`ctrl+a` + `Backspace` is unreliable; leftover parens and radicals survive and corrupt the retry. **Reload the problem page** for a clean field.
+Top Hat runs **problem-by-problem** — there is no bulk-read path (see the
+fallback above). Everything else (modes, self-verification, solution
+procedures) applies unchanged.
 
-## Browser technique
+**Layout.** One question per page; the left sidebar lists items with status badges. Assigned work shows "Not answered · Due soon" and flips to "Completed" on submit. Items with **no** status or due badge are past lecture questions — leave them. Read each item with `get_page_text` **plus** a screenshot.
 
-**What fails:**
+**Grading feedback.** "Correct answers are hidden"; submit shows only Answered/Completed. Changing a response enables **Resubmit** (unverified whether the last submission is graded). Submit/Resubmit near (1301, 695).
 
-- **`form_input` on answer boxes — fails silently and costs an attempt.** It sets the visible value, but the form submits blank and WeBWorK records *"N of the questions remain unanswered"* at 0%. Never use it on a MathQuill field. (Observed on webwork2 2.19; treat as true everywhere until proven otherwise.)
-- **Ref-based clicks** focus the field, but typed text frequently does not land.
-- **`Tab`** jumps into the math palette, not the next cell.
+**Navigation.** Sidebar clicks auto-scroll the sidebar, so `find` refs go stale after one click — navigate by coordinates from a fresh screenshot.
 
-**What works:** screenshot → `left_click` at coordinates → `type` in the same batch → screenshot to verify. `form_input` *does* work on `<select>` dropdowns.
+**Images.** "Image failed to load" → click **Reload Image** before solving.
 
-**Fighting the scroll.** The page jumps after `form_input`, after every preview reload, and sometimes on field focus. Stale coordinates land in the wrong row and silently overwrite a neighbouring cell. **Re-screenshot before clicking anything** following a preview or dropdown change — buttons move when a fraction grows a field or a banner appears. Text in the wrong cell is usually still focused: clear and retype in place.
+### Widgets
 
-**Table fill order.** Fractions make their row taller and push rows below down → **fill bottom-up**. Typing in the left (interval) column widens it and shifts columns right → **fill the value column first**. Set **sign dropdowns first** (one scroll jump), then screenshot and fill text cells.
+- **Multiple choice:** click the option row, then Submit. Rows ~50 px apart from y ≈ 210–226.
+- **Drag-and-drop matching / ordering:** mouse drags unreliable. Keyboard: click the item's `=` handle → `space` → `Up`/`Down` ×N → `space`. **A move swaps** with the item at the destination. Verify with `get_page_text` ("X moved to position N").
+- **Click-on-target (hotspot):** click once per correct region; place one, screenshot, then batch the rest.
 
-## Multi-part problems
+## Parallelism
 
-Inequality problems show Part 1 with Parts 2–3 collapsed.
-
-**Parts unlock on Preview, not on Submit.** Preview after Part 1 to reveal Part 2, fill it, preview again to reveal Part 3, fill it, then submit **once** — the whole problem scores on a single attempt. Submitting Part 1 alone to unlock the rest wastes attempts and records a partial score.
-
-Part 2 asks for values and signs at printed test points, sometimes interval labels too. Evaluate at each test point and enter them without stopping to ask. The sign pattern **must** be consistent with the final answer; if it is not, something is wrong upstream — stop rather than submitting.
-
-## Confirming results
-
-After any submission, read the page text:
-
-- `All of the answers are correct.` / `The answer is correct.` — done
-- `N of the questions remain unanswered.` — the fill did not land; do not retry the same method
-- `You have N attempts remaining.` — track the budget
-
-At the end, load the set page (`.../<SetName>?effectiveUser=<user>`) for the per-problem status table and confirm the total. Always state which answers came from the user and which were derived.
+One browser tab means entry stays sequential — parallel agents in the same Chrome would fight over the page. Agents help only for **solving** (split a large multi-set batch across solvers from the bulk-read text) or for an independent second solve on low-attempt numeric problems. The built-in browser is not faster than Chrome and has separate logins.
 
 ## Improving this skill
 
-Before finishing a run, compare what happened against this file. If something here was wrong, missing, or cost an attempt — or a wrong answer revealed a gap in the solution procedures — propose an updated SKILL.md. WeBWorK grades the work, so unlike most tasks there is real ground truth to learn from: when an answer comes back incorrect, determine whether it was a method error or an entry error before recording anything.
-
-Four disciplines keep this from degrading:
-
-- **Net-zero budget.** Every addition forces a pass at what can be cut or tightened. A file that only grows stops being read carefully.
-- **Earn the entry.** One incident is a note; a repeat is a rule. Add immediately only if it would have changed the outcome. Otherwise the file fills with superstition from one-off page glitches.
-- **Separate observation from inference.** "`form_input` submitted blank on webwork2 2.19" is an observation. "`form_input` never works on MathQuill" is a guess until seen elsewhere. Recording a wrong causal model is worse than recording nothing, because future runs will trust it.
-- **Keep course-specific facts out.** Which host a course lives on, whether it offers hardcopy, its rounding convention — those belong in memory or a project file, not here. This file is about WeBWorK in general and should stay portable across courses and semesters.
+After a run, compare against this file and propose updates if something was wrong, missing, slow, or cost an attempt. Net-zero budget; one incident is a note, a repeat is a rule; separate observation from inference; keep course-specific facts (hosts, conventions) in memory, not here.
