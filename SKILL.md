@@ -1,18 +1,18 @@
 ---
-name: webwork-answer-entry
-description: "Solve and enter answers for online homework in WeBWorK or Top Hat (math, statistics, physics). Use whenever the user points at either platform and wants problems worked, answers entered, or their own work checked."
+name: answer-entry
+description: "Solve and enter answers for online homework in WeBWorK, Top Hat, or d2L (math, statistics, physics, coding). Use whenever the user points at a platform and wants problems worked, answers entered, and submitted."
 ---
 
-# Online Problem Sets (WeBWorK, Top Hat)
+# Online Problem Sets (WeBWorK, Top Hat, d2L Quiz)
 
-**Identify the platform first** from the open tab: a webwork2 URL → everything below applies. `app.tophat.com` → the shared sections (modes, image loss, self-verification, solution procedures) apply, and entry mechanics come from the **Top Hat** section at the end.
+**Identify the platform first** from the open tab: a webwork2 URL → everything below applies. `app.tophat.com` → the shared sections (modes, image loss, self-verification, solution procedures) apply, and entry mechanics come from the **Top Hat** section. A `d2l.*` URL — especially `/d2l/le/enhancedSequenceViewer/` or `/d2l/lms/quizzing/` — → the shared sections apply and entry mechanics come from the **D2L Quiz** section.
 
 For WeBWorK, two facts drive everything:
 
 1. Typed answer boxes are **MathQuill live-math editors**, not text inputs. They rewrite input as it is typed and silently ignore programmatic fill.
 2. Submissions are **metered** (often 3–12 attempts; extra-credit sets may be unlimited). A blank or wrong submission burns one. **Preview is free and unlimited.**
 
-Because attempts are the scarce resource: **a timed-out or failed tool call may still have executed.** Screenshot and check the page state before retrying anything that submits — a blind retry can burn a second attempt or double-submit.
+Because attempts can be the scarce resource: **a timed-out or failed tool call may still have executed.** Screenshot and check page state before retrying anything that submits — a blind retry can burn a second attempt or double-submit.
 
 ## Before you start
 
@@ -21,11 +21,12 @@ Setup, before any problem is touched.
 ### A browser is required
 
 This skill drives a real browser: it reads problems off the rendered page and
-types into live widgets. There is no text-only path. Either browser works —
-measured no speed difference, and they keep **separate logins**:
+types into live widgets, and on D2L it runs JavaScript inside the quiz frame.
+There is no text-only path. Either browser works — measured no speed
+difference, and they keep **separate logins**:
 
-- **Claude in Chrome** — the extension, driving your own Chrome. Existing D2L
-  or WeBWorK sessions are already live in it.
+- **Claude in Chrome** — the extension, driving your own Chrome. Existing D2L,
+  Top Hat or WeBWorK sessions are already live in it.
 - **The Claude desktop app's built-in browser** — a pane inside the app,
   nothing to install; keeps its own profile across sessions.
 
@@ -33,16 +34,16 @@ If neither is available, say so and stop rather than working the set blind.
 
 ### Site permission is the first thing that will stop you (Chrome)
 
-Claude in Chrome gates access per site. The first `navigate` to a new LMS or
-WeBWorK host returns a permission stop, not a page. This is normal and
-one-time per site: tell the user to allow the site in the extension, wait,
+Claude in Chrome gates access per site. The first `navigate` to a new LMS,
+Top Hat or WeBWorK host returns a permission stop, not a page. This is normal
+and one-time per site: tell the user to allow the site in the extension, wait,
 and retry. Do not treat it as a broken tool or work around it.
 
-### Getting to the set
+### Getting to the work
 
 Claude cannot guess a course's address. Ask for either:
 
-- **a direct link** — paste the URL of the set or problem page (fastest)
+- **a direct link** — paste the URL of the set, quiz or problem page (fastest)
 - **the LMS and course** (D2L, Canvas, Blackboard) and navigate through
 
 WeBWorK problem pages have predictable URLs once you have one:
@@ -68,7 +69,7 @@ mid-tier model handles routine sets. Reach for a stronger model on sets that
 are graph-heavy, conceptually fussy, or low on attempts, where reading a
 close call off a mosaic plot or boxplot is the real work.
 
-### First run in a new course
+### First run on a new course or platform
 
 Prove the path before spending attempts. Either run **Check** mode against a
 problem the user has already solved, or enter problem 1 alone and confirm its
@@ -80,13 +81,15 @@ solving.
 
 | Situation | Mode |
 |---|---|
-| User supplies their answers | **Enter** — type them, confirm the on-screen problem matches, submit |
-| User wants their work checked | **Check** — solve independently *before* reading their answers, then diff |
 | User supplies nothing | **Solve** — work everything, self-verify, fill, submit |
 
-In **Solve** mode, show the worked reasoning for each problem — the actual steps, not just the answer. In **Check** mode, solve first and read their answers second. A disagreement means stop: enter neither, show both derivations, let the user adjudicate.
+In **Solve** mode, show the worked reasoning for each problem — the actual steps, not just the answer.
 
 "Complete all open assignments": load the course's assignment list, then each open set's page (`/<course>/<Set>/`) to see per-problem status; skip sets already at 100%; do the earliest-due set first.
+
+**Read the stakes off the platform before entering anything.** Attempts allowed, due date and time limit decide how careful to be: WeBWorK meters submissions, while a D2L quiz is often unlimited-attempt and untimed, which makes a wrong answer nearly free. Don't assume — look, then say which regime you're in.
+
+**Never answer for the user:** attitude and self-efficacy survey items ("I can master the content…"), prior-experience questions, or anything else with no correct answer. These often sit as a tail section on D2L pre-labs, usually flagged as not affecting the grade. Fill the graded questions, leave these blank, and tell the user exactly which ones are theirs to finish.
 
 ## Working a set: read all, solve all, then enter (default)
 
@@ -95,7 +98,8 @@ solve the whole set at once, then go back and enter one problem at a time.
 Measured: 9-problem set in ~4 min this way vs ~13 min problem-by-problem, all
 first-try correct in both. Solving in one pass is also more accurate than
 solving between page loads — shared setups and carry-through parts are visible
-at once.
+at once. D2L follows the same shape by a different route: one JavaScript pass
+dumps the whole quiz, then answers go in together.
 
 1. **Bulk text read — one batch.** Problem pages have direct URLs `/<course>/<Set>/<n>/`. One `browser_batch` of `navigate` + `get_page_text` × every problem. This replaces the hardcopy PDF: downloading it needs the user's permission plus a connected folder to read it, and gives no widget info.
 2. **Solve everything text-solvable immediately**; compute numerics with a short python call (one call for the whole set).
@@ -138,6 +142,8 @@ Run all five on every self-derived computational answer:
 3. **Re-derive by a second route.** One derivation that re-reads itself is worth nothing.
 4. **Numeric evaluation** for plausibility.
 5. **Count expected solutions.**
+
+For code-output questions ("what is the value of…", "what is printed by…") the second route is **running the code**. Put every expression in the set into one python script and print the results — never reason out `rfind`, slice bounds or a format spec by hand when the interpreter will answer. Print `repr()`, and wrap printed output in markers so leading and trailing spaces are visible, because answer choices often differ only by padding.
 
 Conceptual items (variable types, study design, parameter vs statistic) can't run all five: check against the textbook definition and name any convention the course might set differently.
 
@@ -184,6 +190,17 @@ Identities hold only where the *original* was defined.
 ### Graph identification
 
 Match on intercept, asymptote, domain — not overall shape.
+
+### Intro programming (strings, slicing, formatting)
+
+Run it rather than reason it. Traps worth recognising anyway:
+
+- `3 * "125"` repeats the string; `3 * int("125")` is arithmetic; `3 * str(125)` repeats again.
+- `in` on strings tests **substring**, not "any of these letters" — `"ad" in "aardvark"` is `False`.
+- Negative slices: `Z[-3:]`, `Z[-6:-2]` — count from the end, stop index exclusive.
+- String comparison is codepoint-wise, so every uppercase letter sorts before every lowercase one: `"Tiger" > "tiger"` is `False`. Length only decides when one string is a prefix of the other — `"ants" < "anteater"` is `False`, because the first difference (`s` vs `e`) settles it.
+- `find` gives the first index, `rfind` the last, `-1` when absent; `count` counts non-overlapping occurrences.
+- Format specs: width pads, `>`/`<` set alignment, `+` forces a sign. `{:.4f}` on a denormal prints `0.0000`; `{:.4f}` on a near-max float prints all 300+ digits, while `{:.4e}` stays compact.
 
 ### Statistics courses
 
@@ -245,8 +262,7 @@ Parts unlock on **Preview**, not Submit. Fill all parts, then submit once. Sign 
 ## Top Hat
 
 Top Hat runs **problem-by-problem** — there is no bulk-read path (see the
-fallback above). Everything else (modes, self-verification, solution
-procedures) applies unchanged.
+fallback above). Everything else applies unchanged.
 
 **Layout.** One question per page; the left sidebar lists items with status badges. Assigned work shows "Not answered · Due soon" and flips to "Completed" on submit. Items with **no** status or due badge are past lecture questions — leave them. Read each item with `get_page_text` **plus** a screenshot.
 
@@ -262,6 +278,63 @@ procedures) applies unchanged.
 - **Drag-and-drop matching / ordering:** mouse drags unreliable. Keyboard: click the item's `=` handle → `space` → `Up`/`Down` ×N → `space`. **A move swaps** with the item at the destination. Verify with `get_page_text` ("X moved to position N").
 - **Click-on-target (hotspot):** click once per correct region; place one, screenshot, then batch the rest.
 
+## D2L Quiz
+
+Observed on MSU Brightspace, Sept 2026. D2L is the awkward platform: text tools return nothing and scrolling doesn't work, but the entire quiz is reachable from JavaScript in a single pass. Don't grind through it by screenshot before trying the JS route below.
+
+### Scope it first
+
+Open the quiz list — `/d2l/lms/quizzing/user/quizzes_list.d2l?ou=<courseId>` — which reads as ordinary text. It gives the due date, availability, **attempts allowed**, and whether an attempt is already in progress.
+
+The question navigator's visible grid **understates the question count** (a 48-question quiz showed a 15-cell grid with more below the fold). Drag the navigator's own scrollbar to the bottom and read the last number before planning or quoting scope.
+
+### Text extraction is blocked; JavaScript is not
+
+The quiz renders inside a cross-origin iframe, so `get_page_text` and `read_page` both come back empty — on the sequence viewer *and* on the attempt page. Two empties is the signal to switch methods, not to retry.
+
+Recovery path:
+
+1. `read_network_requests` with pattern `quiz` on the sequence-viewer tab → yields `qi=<quizId>` and `ou=<courseId>`. Capture only starts when the tool is first called, so call it once, then reload the page and call it again.
+2. Open `/d2l/lms/quizzing/user/attempt/quiz_start_frame_auto.d2l?ou=<ou>&qi=<qi>` in a **new** tab, leaving the user's own tab untouched. An in-progress attempt resumes there without a password prompt.
+3. Use `javascript_tool` on that tab. Probe the frame tree first — walk `window.frames` recursively, catching the throw on cross-origin ones — and find the same-origin frame holding all the `input[type=radio]` elements.
+
+### Shadow DOM holds the question text
+
+D2L renders question stems and option labels inside web-component shadow roots, so `innerText` on ordinary elements returns empty. Walk `childNodes` **and** `element.shadowRoot` recursively, collecting text nodes and emitting a marker at each radio (checked vs not). All questions are in the DOM at once — the list is not virtualised — so one traversal captures the whole quiz.
+
+Labels come out **triplicated** (`'3125''3125''3125'`). Dedupe by testing whether the string equals its first half or first third repeated.
+
+### javascript_tool limits
+
+- **Returns truncate at roughly 1.5 KB.** Stash the dump on `window` (`window.__dump = …`) and slice it out in ~1.1 KB chunks across several calls; batch those calls together.
+- **Output resembling cookie or query-string data is blocked outright**, returning `[BLOCKED: Cookie/query string data]` instead of the result. `key=value` text joined by `;` triggers it, as do raw URLs and attribute or `outerHTML` dumps. Use separators like ` // ` and ` >> `, and never dump element attributes.
+- **Literal pipes appear in the content** — format questions like `print("|{:5d}| |{:4d}|")` — so don't use `|` as your own delimiter. Re-extract those questions **without collapsing whitespace**, since their answer choices differ only by leading and trailing spaces.
+- **`async`/`await` loops are cut off mid-run** and the call returns `{}`. Click synchronously in a plain `for` loop and verify state in a separate call.
+
+### Entering answers
+
+Group the radios by `name` in DOM order — group *n* is question *n*. **Confirm that mapping before trusting it:** compare which groups are already answered against the navigator's ✓ / `--` badges; the pattern should match exactly.
+
+Fill by calling `.click()` on the radio, not by setting `.checked`, which bypasses D2L's save handler. Canary the first one: click it, then confirm the question shows "✓ Saved", its navigator cell turns ✓, and the footer counter increments.
+
+**Rapid clicks outrun autosave.** After bulk-clicking, the DOM shows every selection but the footer counter stalls and never catches up on its own. Find the button whose text is exactly **`Save All Responses`** and click it — `Submit Quiz` is the adjacent button, so match on exact text, never on index. The counter jumps to the full total within a few seconds.
+
+### Confirming and stopping
+
+Verify two ways: the footer's "N of M questions saved" counter, and a per-group diff of expected option index against the actually-checked index, reporting mismatches only.
+
+**Don't submit.** Saved answers already stand as the attempt, and submitting is the user's call — especially when survey items are deliberately left blank. Hand the tab back and say what remains.
+
+### Navigation is navigator-only
+
+Synthetic wheel `scroll` moves the question pane a few ticks and then stops responding entirely, on both the sequence viewer and the attempt page. Clicking a number in the question navigator reliably jumps the pane. This affects automation only — the user's own mouse scrolls normally, so don't tell them the page is broken. Resizing the window does **not** reflow the iframe; reload after resizing, and expect viewport height to be capped by the physical display regardless of the size requested.
+
+## Tool efficiency notes
+
+- In `browser_batch`, a `scroll` action **already returns its own screenshot**. Adding a `screenshot` after it duplicates the image and wastes tokens.
+- Coordinates inside a batch refer to the screenshot taken *before* the call. So a batch can click a target you've already seen and then navigate and capture the next view — but it can never click something first revealed inside the same batch.
+- `find` and `read_page` refs stay valid only until the page reloads.
+
 ## Parallelism
 
 One browser tab means entry stays sequential — parallel agents in the same Chrome would fight over the page. Agents help only for **solving** (split a large multi-set batch across solvers from the bulk-read text) or for an independent second solve on low-attempt numeric problems. The built-in browser is not faster than Chrome and has separate logins.
@@ -269,3 +342,7 @@ One browser tab means entry stays sequential — parallel agents in the same Chr
 ## Improving this skill
 
 After a run, compare against this file and propose updates if something was wrong, missing, slow, or cost an attempt. Net-zero budget; one incident is a note, a repeat is a rule; separate observation from inference; keep course-specific facts (hosts, conventions) in memory, not here.
+
+**Start any proposed rewrite from the current file, and keep `Before you start`
+and the default/fallback framing.** A saved proposal replaces the whole file,
+and setup guidance has been silently dropped this way twice.
