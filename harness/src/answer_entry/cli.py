@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import sys
+import urllib.parse
 from pathlib import Path
 
-from . import webwork
+from . import http_engine, webwork
 from .browser import HARNESS_ROOT, HarnessBrowser
+from .http_engine import Engine
 from .model import load_answers
+from .timing import Tracker
 
 
 def cmd_login(args: argparse.Namespace) -> int:
@@ -58,9 +62,12 @@ def cmd_read_problem(args: argparse.Namespace) -> int:
 
 def cmd_read_set(args: argparse.Namespace) -> int:
     answers = load_answers(args.answers)
+    tracker = Tracker()
     with HarnessBrowser() as b:
         assert b.context is not None
-        dumps = webwork.read_set(b.context, answers)
+        with tracker.phase("read_set"):
+            dumps = webwork.read_set(b.context, answers)
+    print("timings:", tracker.summary())
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "problems.json").write_text(json.dumps(dumps, indent=2))
@@ -74,20 +81,103 @@ def cmd_enter(args: argparse.Namespace) -> int:
     answers = load_answers(args.answers)
     only = set(args.only) if args.only else None
     reports = []
+    tracker = Tracker()
     with HarnessBrowser(headless=args.headless) as b:
         page = b.new_page()
         for p in answers.problems:
             if only is not None and p.n not in only:
                 continue
             url = answers.problem_url(p)
-            report = webwork.enter_problem(page, p, url, dry_run=args.dry_run)
+            with tracker.phase(f"p{p.n}"):
+                report = webwork.enter_problem(page, p, url, dry_run=args.dry_run)
             reports.append(report)
             print(f"problem {p.n}: {report['status']} — {report.get('detail', '')}")
             if report["status"] not in ("ok", "submitted", "dry_run_ok"):
                 print("stopping: nothing further submitted.", file=sys.stderr)
                 break
+    print("timings:", tracker.summary())
     if args.json:
-        print(json.dumps(reports, indent=2))
+        print(json.dumps({"reports": reports, "timings": tracker.report()}, indent=2))
+    bad = [r for r in reports if r["status"] not in ("ok", "dry_run_ok")]
+    return 1 if bad else 0
+
+
+def cmd_http_auth(args: argparse.Namespace) -> int:
+    with HarnessBrowser(headless=False) as b:
+        page = b.new_page()
+        page.goto(args.url)
+        print("Sign in, then press Enter here.")
+        try:
+            input()
+        except EOFError:
+            pass
+        assert b.context is not None
+        cookies = b.context.cookies()
+    jar = http_engine.export_playwright_cookies(cookies)
+    engine = Engine(jar_path=jar)
+    html = engine.get(args.url)
+    print(f"saved {len(cookies)} cookies -> {jar}; verify GET: {len(html)} chars")
+    return 0
+
+
+def cmd_http_fetch(args: argparse.Namespace) -> int:
+    answers = load_answers(args.answers)
+    engine = Engine()
+    tracker = Tracker()
+    urls = [answers.problem_url(p) for p in answers.problems]
+    pages = engine.fetch_all(urls, tracker=tracker)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    dumps = []
+    with tracker.phase("parse"):
+        for p in answers.problems:
+            url = answers.problem_url(p)
+            parsed = http_engine.parse_problem(pages[url], url)
+            (out / f"problem-{p.n}.html").write_text(pages[url])
+            dumps.append({"n": p.n, "url": url, "text": parsed.text,
+                          "blanks": parsed.blanks, "images": parsed.images})
+    if args.figures:
+        with tracker.phase("figures"):
+            figdir = out / "figures"
+            figdir.mkdir(exist_ok=True)
+            for d in dumps:
+                for i, src in enumerate(d["images"]):
+                    ext = Path(urllib.parse.urlparse(src).path).suffix or ".img"
+                    (figdir / f"p{d['n']}-{i}{ext}").write_bytes(
+                        engine.get_bytes(src))
+    (out / "problems.json").write_text(json.dumps(dumps, indent=2))
+    print(f"fetched {len(dumps)} problems -> {out / 'problems.json'}")
+    print("timings:", tracker.summary())
+    return 0
+
+
+def cmd_http_enter(args: argparse.Namespace) -> int:
+    answers = load_answers(args.answers)
+    only = set(args.only) if args.only else None
+    engine = Engine()
+    tracker = Tracker()
+    reports = []
+    for p in answers.problems:
+        if only is not None and p.n not in only:
+            continue
+        url = answers.problem_url(p)
+        values = [a.value for a in p.answers]
+        with tracker.phase(f"p{p.n}"):
+            r = http_engine.enter_problem(engine, p.n, url, values,
+                                          dry_run=args.dry_run,
+                                          confirm_live=args.confirm_live,
+                                          tracker=tracker)
+        reports.append(dataclasses.asdict(r))
+        print(f"problem {p.n}: {r.status} — {r.detail}")
+        if r.status == "withheld":
+            print("re-run with --confirm-live to actually POST (protocol provisional).")
+            break
+        if r.status not in ("ok", "submitted", "dry_run_ok"):
+            print("stopping: nothing further submitted.", file=sys.stderr)
+            break
+    print("timings:", tracker.summary())
+    if args.json:
+        print(json.dumps({"reports": reports, "timings": tracker.report()}, indent=2))
     bad = [r for r in reports if r["status"] not in ("ok", "dry_run_ok")]
     return 1 if bad else 0
 
@@ -135,6 +225,24 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("status", help="per-problem status from a set page (best effort)")
     s.add_argument("set_url")
     s.set_defaults(func=cmd_status)
+
+    s = sub.add_parser("http-auth", help="headed sign-in, then export cookies to the HTTP engine")
+    s.add_argument("url")
+    s.set_defaults(func=cmd_http_auth)
+
+    s = sub.add_parser("http-fetch", help="parallel HTTP fetch + parse of every problem in answers.json")
+    s.add_argument("answers")
+    s.add_argument("--out", default="dumps/http-set", help="output directory")
+    s.add_argument("--figures", action="store_true", help="also download figure images")
+    s.set_defaults(func=cmd_http_fetch)
+
+    s = sub.add_parser("http-enter", help="HTTP fill + submit (withholds POSTs without --confirm-live)")
+    s.add_argument("answers")
+    s.add_argument("--dry-run", action="store_true", help="preview POST, never submit")
+    s.add_argument("--confirm-live", action="store_true", help="actually POST (protocol provisional)")
+    s.add_argument("--only", type=int, nargs="*", default=None)
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_http_enter)
 
     return p
 

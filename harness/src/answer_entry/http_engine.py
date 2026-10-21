@@ -1,0 +1,373 @@
+"""HTTP engine: WeBWorK without a browser.
+
+Design: generic form replay. The engine never hardcodes WeBWorK field names —
+it parses the problem page's form, overrides the answer blanks in order, and
+POSTs everything back the way the page would. Preview/submit buttons are found
+by label.
+
+Status: engine logic validated against a mock server (tests/). Real-page shape
+awaits ONE live capture: which hidden inputs are answer blanks (see
+ANSWER_PATTERN), exact button labels, score markup. Until then, `http-enter`
+refuses to POST without --confirm-live.
+"""
+from __future__ import annotations
+
+import concurrent.futures
+import re
+import threading
+import time
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass, field
+from html.parser import HTMLParser
+from http.cookiejar import Cookie, MozillaCookieJar
+from pathlib import Path
+from typing import Any
+
+from .browser import PROFILE_DIR
+from .timing import Tracker
+from .webwork import parse_score_text
+
+COOKIE_JAR = PROFILE_DIR / "http_cookies.txt"
+USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+)
+
+# Provisional: hidden inputs whose name matches are treated as answer blanks
+# (MathQuill editors persist LaTeX into hidden inputs). Pin down at capture.
+ANSWER_PATTERN = r"AnSwEr"
+
+PREVIEW_LABEL = re.compile(r"preview", re.IGNORECASE)
+SUBMIT_LABEL = re.compile(r"submit|check answer", re.IGNORECASE)
+
+
+class _PageParser(HTMLParser):
+    """Collects forms (fields in document order), text, and image URLs."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.forms: list[dict[str, Any]] = []
+        self.page_text: list[str] = []
+        self.page_images: list[str] = []
+        self._form: dict[str, Any] | None = None
+        self._select: dict[str, Any] | None = None
+        self._option: dict[str, Any] | None = None
+        self._skip = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        a = {k: v or "" for k, v in attrs}
+        if tag in ("script", "style"):
+            self._skip += 1
+            return
+        if tag == "form":
+            self._form = {"action": a.get("action", ""),
+                          "method": a.get("method", "get").lower(),
+                          "fields": [], "text": [], "images": []}
+            self.forms.append(self._form)
+        elif tag == "input" and self._form is not None:
+            self._form["fields"].append({
+                "tag": "input", "kind": a.get("type", "text").lower(),
+                "name": a.get("name"), "value": a.get("value", ""),
+                "checked": "checked" in a})
+        elif tag == "select" and self._form is not None:
+            self._select = {"tag": "select", "kind": "select",
+                            "name": a.get("name"), "options": []}
+            self._form["fields"].append(self._select)
+        elif tag == "option" and self._select is not None:
+            self._option = {"value": a.get("value"), "label": "",
+                            "selected": "selected" in a}
+            self._select["options"].append(self._option)
+        elif tag == "textarea" and self._form is not None:
+            self._form["fields"].append({"tag": "textarea", "kind": "textarea",
+                                         "name": a.get("name"), "value": ""})
+        elif tag == "img":
+            if a.get("src"):
+                self.page_images.append(a["src"])
+                if self._form is not None:
+                    self._form["images"].append(a["src"])
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style"):
+            self._skip = max(0, self._skip - 1)
+        elif tag == "form":
+            self._form = None
+        elif tag == "select":
+            self._select = None
+        elif tag == "option":
+            self._option = None
+
+    def handle_data(self, data: str) -> None:
+        if self._skip:
+            return
+        s = data.strip()
+        if not s:
+            return
+        if self._option is not None:
+            self._option["label"] += s
+            if not self._option["value"]:
+                self._option["value"] = s
+        else:
+            self.page_text.append(s)
+            if self._form is not None:
+                self._form["text"].append(s)
+
+
+@dataclass
+class ParsedProblem:
+    url: str
+    text: str
+    images: list[str]
+    form_action: str
+    form_method: str
+    replay_fields: list[tuple[str, str]]  # opaque round-trip fields (hidden etc.)
+    blanks: list[dict[str, Any]]  # answer widgets in document order
+    buttons: list[dict[str, Any]]  # submit/button inputs by label
+
+
+def parse_problem(html: str, url: str, answer_pattern: str = ANSWER_PATTERN) -> ParsedProblem:
+    parser = _PageParser()
+    parser.feed(html)
+    answerish = {"text", "select", "radio", "checkbox", "textarea"}
+    form = next((f for f in parser.forms
+                 if any(g["kind"] in answerish or
+                        (g["kind"] == "hidden" and g["name"] and re.search(answer_pattern, g["name"]))
+                        for g in f["fields"] if g.get("name"))), None)
+    if form is None:
+        raise ValueError(f"no answer form found at {url}")
+
+    blanks: list[dict[str, Any]] = []
+    replay: list[tuple[str, str]] = []
+    buttons: list[dict[str, Any]] = []
+    radio_groups: dict[str, dict[str, Any]] = {}
+    check_groups: dict[str, dict[str, Any]] = {}
+
+    def group(groups: dict[str, dict[str, Any]], name: str, kind: str) -> dict[str, Any]:
+        if name not in groups:
+            groups[name] = {"kind": kind, "name": name, "options": []}
+            blanks.append(groups[name])
+        return groups[name]
+
+    for g in form["fields"]:
+        name, kind = g.get("name"), g["kind"]
+        if kind in ("submit", "button") or (g["tag"] == "input" and kind == "image"):
+            buttons.append({"name": name, "value": g["value"], "label": g["value"]})
+        elif kind == "select" and name:
+            blanks.append({"kind": "select", "name": name, "options": g["options"]})
+        elif kind == "radio" and name:
+            group(radio_groups, name, "radio")["options"].append(
+                {"label": g["value"], "value": g["value"], "checked": g["checked"]})
+        elif kind == "checkbox" and name:
+            group(check_groups, name, "checkbox")["options"].append(
+                {"label": g["value"], "value": g["value"], "checked": g["checked"]})
+        elif kind in ("text", "textarea") and name:
+            blanks.append({"kind": "text", "name": name, "current": g["value"]})
+        elif kind == "hidden" and name:
+            if re.search(answer_pattern, name):
+                blanks.append({"kind": "mathquill", "name": name, "current": g["value"]})
+            else:
+                replay.append((name, g["value"]))
+        elif name and kind not in ("password", "file"):
+            replay.append((name, g["value"]))
+
+    text = "\n".join(form["text"]) or "\n".join(parser.page_text)
+    images = [urllib.parse.urljoin(url, src)
+              for src in (form["images"] or parser.page_images)]
+    return ParsedProblem(url=url, text=text, images=images,
+                         form_action=urllib.parse.urljoin(url, form["action"] or url),
+                         form_method=form["method"], replay_fields=replay,
+                         blanks=blanks, buttons=buttons)
+
+
+def _find_button(buttons: list[dict[str, Any]], pattern: re.Pattern[str], what: str) -> dict[str, Any]:
+    for b in buttons:
+        if b["name"] and pattern.search(b["label"]):
+            return b
+    raise ValueError(f"no {what} button found "
+                     f"(have {[b['label'] for b in buttons]})")
+
+
+def build_submission(parsed: ParsedProblem, answers: list[Any],
+                     button: dict[str, Any]) -> list[tuple[str, str]]:
+    """Field list for POST: replayed opaque fields + overridden blanks + button."""
+    if len(answers) != len(parsed.blanks):
+        raise ValueError(f"{len(answers)} answers but {len(parsed.blanks)} blanks at {parsed.url}")
+    out: list[tuple[str, str]] = list(parsed.replay_fields)
+    for blank, value in zip(parsed.blanks, answers):
+        kind = blank["kind"]
+        if kind in ("text", "mathquill"):
+            assert isinstance(value, str), f"{blank['name']}: want str"
+            out.append((blank["name"], value))
+        elif kind == "select":
+            assert isinstance(value, str), f"{blank['name']}: want str"
+            out.append((blank["name"], _select_value(blank, value)))
+        elif kind == "radio":
+            assert isinstance(value, str), f"{blank['name']}: want str"
+            out.append((blank["name"], _option_value(blank, value, "radio")))
+        elif kind == "checkbox":
+            assert isinstance(value, list), f"{blank['name']}: want list"
+            for v in value:
+                out.append((blank["name"], _option_value(blank, v, "checkbox")))
+        else:
+            raise ValueError(f"unknown blank kind {kind!r}")
+    if button.get("name"):
+        out.append((button["name"], button["value"]))
+    return out
+
+
+def _select_value(blank: dict[str, Any], value: str) -> str:
+    if value.startswith("index:"):
+        return blank["options"][int(value.removeprefix("index:"))]["value"]
+    for o in blank["options"]:
+        if o["label"] == value:
+            return o["value"]
+    raise ValueError(f"{blank['name']}: no option labelled {value!r}")
+
+
+def _option_value(blank: dict[str, Any], value: str, what: str) -> str:
+    if value.startswith("index:"):
+        return blank["options"][int(value.removeprefix("index:"))]["value"]
+    for o in blank["options"]:
+        if o["label"] == value or o["value"] == value:
+            return o["value"]
+    raise ValueError(f"{blank['name']}: no {what} option {value!r}")
+
+
+def strip_to_text(html: str) -> str:
+    no_script = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
+    return re.sub(r"\s+", " ",
+                  re.sub(r"<[^>]+>", " ", no_script)).strip()
+
+
+class Engine:
+    """Cookie-authenticated HTTP session with keep-alive and parallel fetch."""
+
+    def __init__(self, jar_path: str | Path = COOKIE_JAR):
+        self.jar_path = Path(jar_path)
+        self.jar = MozillaCookieJar(self.jar_path)
+        if self.jar_path.exists():
+            # Session cookies come back with discard set; keep them too.
+            self.jar.load(ignore_discard=True, ignore_expires=True)
+        self._local = threading.local()
+
+    def _opener(self) -> urllib.request.OpenerDirector:
+        opener = getattr(self._local, "opener", None)
+        if opener is None:
+            opener = urllib.request.build_opener(
+                urllib.request.HTTPCookieProcessor(self.jar))
+            opener.addheaders = [("User-Agent", USER_AGENT)]
+            self._local.opener = opener
+        return opener
+
+    def save(self) -> None:
+        self.jar_path.parent.mkdir(parents=True, exist_ok=True)
+        # Persist session cookies too: a saved login that evaporates is useless.
+        self.jar.save(ignore_discard=True, ignore_expires=True)
+
+    def get(self, url: str, timeout: int = 30) -> str:
+        with self._opener().open(url, timeout=timeout) as r:
+            return r.read().decode("utf-8", "replace")
+
+    def get_bytes(self, url: str, timeout: int = 30) -> bytes:
+        with self._opener().open(url, timeout=timeout) as r:
+            return r.read()
+
+    def post(self, url: str, fields: list[tuple[str, str]], timeout: int = 30) -> str:
+        data = urllib.parse.urlencode(fields).encode()
+        req = urllib.request.Request(url, data=data)
+        with self._opener().open(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", "replace")
+
+    def fetch_all(self, urls: list[str], workers: int = 8,
+                  tracker: Tracker | None = None) -> dict[str, str]:
+        """Parallel GET. Total time ≈ slowest single fetch."""
+        out: dict[str, str] = {}
+        t0 = time.perf_counter()
+
+        def one(url: str) -> tuple[str, str]:
+            return url, self.get(url)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            for url, html in pool.map(one, urls):
+                out[url] = html
+        if tracker is not None:
+            tracker.phases["fetch_all"] = tracker.phases.get("fetch_all", 0.0) \
+                + (time.perf_counter() - t0)
+            if "fetch_all" not in tracker._order:
+                tracker._order.append("fetch_all")
+        return out
+
+
+def export_playwright_cookies(pw_cookies: list[dict[str, Any]],
+                              jar_path: str | Path = COOKIE_JAR) -> Path:
+    """Bridge: browser login → HTTP session. Overwrites the cookie jar."""
+    jar_path = Path(jar_path)
+    jar = MozillaCookieJar(jar_path)
+    for c in pw_cookies:
+        jar.set_cookie(Cookie(
+            version=0, name=c["name"], value=c["value"],
+            port=None, port_specified=False,
+            domain=c.get("domain", ""), domain_specified=bool(c.get("domain")),
+            domain_initial_dot=(c.get("domain", "") or "").startswith("."),
+            path=c.get("path", "/"), path_specified=True,
+            secure=bool(c.get("secure", False)), expires=c.get("expires", None),
+            discard=False, comment=None, comment_url=None,
+            rest={"HttpOnly": ""} if c.get("httpOnly") else {},
+            rfc2109=False))
+    jar_path.parent.mkdir(parents=True, exist_ok=True)
+    jar.save(ignore_discard=True, ignore_expires=True)
+    return jar_path
+
+
+@dataclass
+class EnterResult:
+    n: int
+    url: str
+    status: str
+    detail: str
+    would_send: list[tuple[str, str]] = field(default_factory=list)
+    score: dict[str, Any] | None = None
+
+
+def enter_problem(engine: Engine, n: int, url: str, answers: list[Any],
+                  dry_run: bool = False, confirm_live: bool = False,
+                  tracker: Tracker | None = None) -> EnterResult:
+    """GET → parse → count check → preview POST → submit POST → parse score.
+
+    Without confirm_live, performs zero POSTs and reports exactly what would
+    be sent. The gate comes off once live capture validates the protocol.
+    """
+    t = tracker or Tracker()
+    with t.phase("fetch"):
+        html = engine.get(url)
+    with t.phase("parse"):
+        parsed = parse_problem(html, url)
+    if "Login" in html[:2000] and not parsed.blanks:
+        return EnterResult(n, url, "login_required",
+                           "page has no answer form; run `harness http-auth` first")
+    if len(answers) != len(parsed.blanks):
+        return EnterResult(n, url, "widget_shortage" if len(answers) > len(parsed.blanks)
+                           else "answer_shortage",
+                           f"{len(answers)} answers but {len(parsed.blanks)} blanks")
+    try:
+        preview_fields = build_submission(
+            parsed, answers, _find_button(parsed.buttons, PREVIEW_LABEL, "preview"))
+        submit_fields = build_submission(
+            parsed, answers, _find_button(parsed.buttons, SUBMIT_LABEL, "submit"))
+    except ValueError as e:
+        return EnterResult(n, url, "form_error", str(e))
+
+    if not confirm_live:
+        return EnterResult(n, url, "withheld",
+                           "provisional protocol: re-run with --confirm-live to POST",
+                           would_send=submit_fields)
+    with t.phase("preview"):
+        engine.post(parsed.form_action, preview_fields)
+    if dry_run:
+        return EnterResult(n, url, "dry_run_ok",
+                           f"{len(answers)} answers previewed, not submitted")
+    with t.phase("submit"):
+        result_html = engine.post(parsed.form_action, submit_fields)
+    score = parse_score_text(strip_to_text(result_html))
+    status = "ok" if score.get("percent") == 100 else "submitted"
+    return EnterResult(n, url, status, score["verdict"], score=score)

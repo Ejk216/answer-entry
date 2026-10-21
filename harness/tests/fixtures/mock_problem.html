@@ -1,0 +1,26 @@
+<!doctype html>
+<!-- MOCK WeBWorK-style problem page for offline engine tests. Field names are
+     invented for self-consistency, not copied from real WeBWorK. -->
+<html><body>
+<form method="post" action="/submit" id="problemMainForm">
+  <div class="problem-content">
+    <p>If f(x) = 3x + 2, find f(4) and enter it below.</p>
+    <img src="/fig1.png">
+  </div>
+  <input type="hidden" name="session_key" value="sess-1">
+  <input type="hidden" name="user" value="student">
+  Answer 1: <input type="text" name="blank1" value="">
+  <input type="hidden" name="AnSwEr2" value="">
+  <select name="choice1">
+    <option value="0">?</option>
+    <option value="1">42</option>
+    <option value="2">43</option>
+  </select>
+  <label><input type="radio" name="color" value="red"> red</label>
+  <label><input type="radio" name="color" value="green"> green</label>
+  <label><input type="checkbox" name="opts" value="A"> A</label>
+  <label><input type="checkbox" name="opts" value="B"> B</label>
+  <input type="submit" name="previewAnswers" value="Preview Answers">
+  <input type="submit" name="submitAnswers" value="Submit Answers">
+</form>
+</body></html>
