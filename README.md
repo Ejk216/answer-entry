@@ -23,6 +23,14 @@ Plus the parts that aren't platform-specific: a self-verification protocol for
 when Claude is solving rather than transcribing, and the traps in common
 problem types.
 
+## Layout
+
+- `SKILL.md` — router: setup, modes, stakes, pipeline, speed and recovery rules
+- `references/webwork.md`, `references/tophat.md`, `references/d2l.md` — entry
+  mechanics per platform (read only the one you're on)
+- `references/solving.md` — self-verification and solution procedures
+  (Solve/Check modes only; Enter mode skips it)
+
 ## Install
 
 **claude.ai** — download this repo as a ZIP (green *Code* button →
@@ -37,6 +45,10 @@ git clone https://github.com/Ejk216/answer-entry.git \
 
 The file needs to land at `~/.claude/skills/answer-entry/SKILL.md`.
 Start a new session and Claude picks it up.
+
+**Updating:** re-upload the ZIP after pulling, so the installed copy doesn't go
+stale — compare the `Version:` line at the top of `SKILL.md` against the repo
+if in doubt.
 
 ## What you need
 
