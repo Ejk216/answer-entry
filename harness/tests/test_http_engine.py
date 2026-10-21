@@ -33,7 +33,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/fig1.png":
             self._send(b"\x89PNG\r\n\x1a" + b"\0" * 64, "image/png")
         elif self.path.startswith("/course/set/"):
-            self._send(PROBLEM_HTML.encode(), "text/html",
+            html = PROBLEM_HTML
+            if self.path == "/course/set/99/":
+                html = html.replace('action="/submit"', 'action="/submit-junk"')
+            self._send(html.encode(), "text/html",
                        cookie="session=abc; Path=/")
         else:
             self.send_error(404)
@@ -42,6 +45,9 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers["Content-Length"])
         fields = urllib.parse.parse_qsl(self.rfile.read(length).decode())
         Handler.posts.append(fields)
+        if self.path == "/submit-junk":
+            self._send(b"<html><body>weird new version</body></html>", "text/html")
+            return
         names = [k for k, _ in fields]
         if "submitAnswers" in names:
             self._send(SCORE_HTML.encode(), "text/html")
@@ -88,10 +94,13 @@ def test_parse_problem(server, engine):
         "text", "mathquill", "select", "radio", "checkbox"]
     assert ("session_key", "sess-1") in parsed.replay_fields
     assert ("user", "student") in parsed.replay_fields
+    assert ("Input1", "1") in parsed.replay_fields  # non-answer control: replayed
     assert sorted(b["label"] for b in parsed.buttons) == [
         "Preview Answers", "Submit Answers"]
     assert parsed.images == [f"{server}/fig1.png"]
     assert "f(x)" in parsed.text
+    assert "$ f(x) = 3x + 2 $" in parsed.text  # math/tex kept
+    assert "noise" not in parsed.text  # plain script dropped
     assert parsed.form_action == f"{server}/submit"
 
 
@@ -100,7 +109,7 @@ def test_build_submission(server, engine):
                            f"{server}/course/set/1/")
     submit = next(b for b in parsed.buttons if b["label"] == "Submit Answers")
     fields = dict_repeated(http_engine.build_submission(parsed, ANSWERS, submit))
-    assert fields["blank1"] == ["14"]
+    assert fields["AnSwEr0001"] == ["14"]
     assert fields["AnSwEr2"] == ["x^2"]
     assert fields["choice1"] == ["1"]  # label 42 -> option value
     assert fields["color"] == ["green"]
@@ -118,19 +127,17 @@ def dict_repeated(pairs):
     return out
 
 
-def test_enter_withheld_without_confirm(server, engine):
+def test_enter_stops_on_protocol_drift(server, engine):
     Handler.posts.clear()
-    result = http_engine.enter_problem(engine, 1, f"{server}/course/set/1/",
+    result = http_engine.enter_problem(engine, 99, f"{server}/course/set/99/",
                                        ANSWERS)
-    assert result.status == "withheld", result.detail
-    assert ("blank1", "14") in result.would_send
-    assert Handler.posts == []  # zero POSTs without --confirm-live
+    assert result.status == "protocol_drift", result.detail
 
 
 def test_enter_live_posts_preview_then_submit(server, engine):
     Handler.posts.clear()
     result = http_engine.enter_problem(engine, 1, f"{server}/course/set/1/",
-                                       ANSWERS, confirm_live=True)
+                                       ANSWERS)
     assert result.status == "ok", result.detail
     assert result.score and result.score["percent"] == 100
     assert len(Handler.posts) == 2
@@ -139,13 +146,13 @@ def test_enter_live_posts_preview_then_submit(server, engine):
     assert "previewAnswers" in first and "submitAnswers" not in first
     assert "submitAnswers" in second
     sent = dict_repeated(Handler.posts[1])
-    assert sent["blank1"] == ["14"] and sent["session_key"] == ["sess-1"]
+    assert sent["AnSwEr0001"] == ["14"] and sent["session_key"] == ["sess-1"]
 
 
 def test_enter_dry_run_previews_only(server, engine):
     Handler.posts.clear()
     result = http_engine.enter_problem(engine, 1, f"{server}/course/set/1/",
-                                       ANSWERS, dry_run=True, confirm_live=True)
+                                       ANSWERS, dry_run=True)
     assert result.status == "dry_run_ok", result.detail
     assert len(Handler.posts) == 1
     assert "previewAnswers" in [k for k, _ in Handler.posts[0]]

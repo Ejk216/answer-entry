@@ -5,10 +5,9 @@ it parses the problem page's form, overrides the answer blanks in order, and
 POSTs everything back the way the page would. Preview/submit buttons are found
 by label.
 
-Status: engine logic validated against a mock server (tests/). Real-page shape
-awaits ONE live capture: which hidden inputs are answer blanks (see
-ANSWER_PATTERN), exact button labels, score markup. Until then, `http-enter`
-refuses to POST without --confirm-live.
+Status: validated live on WeBWorK 2.19 (Oct 2026, local 1:1): 8-problem set,
+all first-try correct, plus mock-server coverage (tests/). Answer blanks are
+text inputs named AnSwErNNNN; MaThQuIlL_/previous_ companions replay verbatim.
 """
 from __future__ import annotations
 
@@ -18,7 +17,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from http.cookiejar import Cookie, MozillaCookieJar
 from pathlib import Path
@@ -34,9 +33,11 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 )
 
-# Provisional: hidden inputs whose name matches are treated as answer blanks
-# (MathQuill editors persist LaTeX into hidden inputs). Pin down at capture.
-ANSWER_PATTERN = r"AnSwEr"
+# Validated on 2.19 (local 1:1, Oct 2026): answer blanks are text inputs named
+# AnSwEr0001, AnSwEr0002, ... Hidden companions MaThQuIlL_AnSwEr0001 and
+# previous_AnSwEr0001 are replayed verbatim, never filled.
+ANSWER_PATTERN = r"^AnSwEr\d"
+REPLAY_PREFIXES = ("MaThQuIlL_", "previous_")
 
 PREVIEW_LABEL = re.compile(r"preview", re.IGNORECASE)
 SUBMIT_LABEL = re.compile(r"submit|check answer", re.IGNORECASE)
@@ -57,8 +58,15 @@ class _PageParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         a = {k: v or "" for k, v in attrs}
-        if tag in ("script", "style"):
+        if tag == "style":
             self._skip += 1
+            return
+        if tag == "script":
+            # MathJax displayMode puts TeX in script tags: keep it, skip the rest.
+            if a.get("type", "").startswith("math/tex"):
+                self._math = True
+            else:
+                self._skip += 1
             return
         if tag == "form":
             self._form = {"action": a.get("action", ""),
@@ -88,8 +96,13 @@ class _PageParser(HTMLParser):
                     self._form["images"].append(a["src"])
 
     def handle_endtag(self, tag: str) -> None:
-        if tag in ("script", "style"):
+        if tag == "style":
             self._skip = max(0, self._skip - 1)
+        elif tag == "script":
+            if getattr(self, "_math", False):
+                self._math = False
+            else:
+                self._skip = max(0, self._skip - 1)
         elif tag == "form":
             self._form = None
         elif tag == "select":
@@ -103,6 +116,8 @@ class _PageParser(HTMLParser):
         s = data.strip()
         if not s:
             return
+        if getattr(self, "_math", False):
+            s = f"$ {s} $"
         if self._option is not None:
             self._option["label"] += s
             if not self._option["value"]:
@@ -161,9 +176,16 @@ def parse_problem(html: str, url: str, answer_pattern: str = ANSWER_PATTERN) -> 
             group(check_groups, name, "checkbox")["options"].append(
                 {"label": g["value"], "value": g["value"], "checked": g["checked"]})
         elif kind in ("text", "textarea") and name:
-            blanks.append({"kind": "text", "name": name, "current": g["value"]})
-        elif kind == "hidden" and name:
+            # PG names every graded blank AnSwErNNNN; anything else is a
+            # control or JS-widget scratch input: replay, never fill.
             if re.search(answer_pattern, name):
+                blanks.append({"kind": "text", "name": name, "current": g["value"]})
+            else:
+                replay.append((name, g["value"]))
+        elif kind == "hidden" and name:
+            if name.startswith(REPLAY_PREFIXES):
+                replay.append((name, g["value"]))
+            elif re.search(answer_pattern, name):
                 blanks.append({"kind": "mathquill", "name": name, "current": g["value"]})
             else:
                 replay.append((name, g["value"]))
@@ -171,8 +193,9 @@ def parse_problem(html: str, url: str, answer_pattern: str = ANSWER_PATTERN) -> 
             replay.append((name, g["value"]))
 
     text = "\n".join(form["text"]) or "\n".join(parser.page_text)
-    images = [urllib.parse.urljoin(url, src)
-              for src in (form["images"] or parser.page_images)]
+    # Form images only: figures render inside the problem. Falling back to
+    # page images picks up theme logos.
+    images = [urllib.parse.urljoin(url, src) for src in form["images"]]
     return ParsedProblem(url=url, text=text, images=images,
                          form_action=urllib.parse.urljoin(url, form["action"] or url),
                          form_method=form["method"], replay_fields=replay,
@@ -325,17 +348,17 @@ class EnterResult:
     url: str
     status: str
     detail: str
-    would_send: list[tuple[str, str]] = field(default_factory=list)
     score: dict[str, Any] | None = None
 
 
 def enter_problem(engine: Engine, n: int, url: str, answers: list[Any],
-                  dry_run: bool = False, confirm_live: bool = False,
+                  dry_run: bool = False,
                   tracker: Tracker | None = None) -> EnterResult:
     """GET → parse → count check → preview POST → submit POST → parse score.
 
-    Without confirm_live, performs zero POSTs and reports exactly what would
-    be sent. The gate comes off once live capture validates the protocol.
+    Validated live on WeBWorK 2.19 (Oct 2026): 8-problem set, all first-try
+    correct. A submit response without a score message means the protocol
+    drifted (new WeBWorK version?) and stops the run instead of guessing.
     """
     t = tracker or Tracker()
     with t.phase("fetch"):
@@ -357,10 +380,6 @@ def enter_problem(engine: Engine, n: int, url: str, answers: list[Any],
     except ValueError as e:
         return EnterResult(n, url, "form_error", str(e))
 
-    if not confirm_live:
-        return EnterResult(n, url, "withheld",
-                           "provisional protocol: re-run with --confirm-live to POST",
-                           would_send=submit_fields)
     with t.phase("preview"):
         engine.post(parsed.form_action, preview_fields)
     if dry_run:
@@ -369,5 +388,9 @@ def enter_problem(engine: Engine, n: int, url: str, answers: list[Any],
     with t.phase("submit"):
         result_html = engine.post(parsed.form_action, submit_fields)
     score = parse_score_text(strip_to_text(result_html))
+    if score.get("percent") is None and score.get("unanswered") is None:
+        return EnterResult(n, url, "protocol_drift",
+                           "submit response had no score message; stopping",
+                           score=score)
     status = "ok" if score.get("percent") == 100 else "submitted"
     return EnterResult(n, url, status, score["verdict"], score=score)

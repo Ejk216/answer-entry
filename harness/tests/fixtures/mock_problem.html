@@ -4,13 +4,15 @@
 <html><body>
 <form method="post" action="/submit" id="problemMainForm">
   <div class="problem-content">
-    <p>If f(x) = 3x + 2, find f(4) and enter it below.</p>
+    <p>If <script type="math/tex">f(x) = 3x + 2</script>, find f(4) and enter it below.</p>
+    <script>var noise = 1;</script>
     <img src="/fig1.png">
   </div>
   <input type="hidden" name="session_key" value="sess-1">
   <input type="hidden" name="user" value="student">
-  Answer 1: <input type="text" name="blank1" value="">
+  Answer 1: <input type="text" name="AnSwEr0001" value="">
   <input type="hidden" name="AnSwEr2" value="">
+  <input type="text" name="Input1" value="1">
   <select name="choice1">
     <option value="0">?</option>
     <option value="1">42</option>
@@ -23,4 +25,5 @@
   <input type="submit" name="previewAnswers" value="Preview Answers">
   <input type="submit" name="submitAnswers" value="Submit Answers">
 </form>
+<img src="/theme-logo.svg">
 </body></html>

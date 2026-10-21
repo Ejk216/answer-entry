@@ -9,11 +9,52 @@ problem; every widget is read back and compared before anything submits.
 
 | Piece | State | Notes |
 |---|---|---|
-| Fill + read-back + submit + score | Validated | 13 tests green vs local fixtures |
-| MathQuill `.latex('')` + `.write()` entry | Validated live | 8-problem set, Oct 2026, first-try correct; canary still governs new installs |
-| Problem-text selectors | **Unvalidated** | Candidate cascade; finalize via `probe` |
+| Browser fill + read-back + submit + score | Validated live | 8-problem set, Oct 2026, first-try correct |
+| HTTP engine (fetch/parse/replay/submit) | Validated live | 8/8 first-try on local 2.19, ~10 s mechanical; mock-server tests green |
+| Problem-text selectors (browser path) | **Unvalidated** | Candidate cascade; finalize via `probe` |
 | Set enumeration + status | **Unvalidated** | Confirm on a live set page |
 | D2L / Top Hat | Not built | Procedures live in `references/`; roadmap |
+
+## HTTP engine (no browser)
+
+The fast path: cookie-authenticated HTTP against WeBWorK directly. Generic
+form replay — no hardcoded field names — with parallel fetch.
+
+```bash
+# One-time: sign in through the browser, export cookies to the engine
+uv run harness http-auth http://localhost:8080/webwork2/testcourse/
+
+# Fetch + parse every problem (parallel; saves HTML + problems.json)
+uv run harness http-fetch answers.json --out dumps/http-set --figures
+
+# Canary problem 1, then the set (a scoreless submit response stops the run:
+# that means the protocol drifted, e.g. a new WeBWorK version)
+uv run harness http-enter answers.json --dry-run --only 1
+uv run harness http-enter answers.json --only 1
+uv run harness http-enter answers.json
+```
+
+Every command prints per-phase timings (`fetch / parse / preview / submit`).
+
+## Local WeBWorK 2.19 (1:1 test environment)
+
+Real server, same version as the school, running in Docker one directory over
+(`Developer/webwork-test-env`). Free attempts, zero stakes — the proving
+ground for the HTTP engine before it touches a live set.
+
+```bash
+cd ../webwork-test-env
+docker compose up -d        # first boot clones the OPL; takes a while
+uv run --project ../webwork-answer-entry/harness \
+  python provision_test_course.py   # course `test`, set DemoTest, users prof1/student1
+open http://localhost:8080/webwork2/
+```
+
+Test accounts: prof1 / testprofpass, student1 / teststudentpass (local only).
+Courses live in `ww-courses/` (bind-mounted). The DemoTest set is the HTTP
+engine's regression target: re-run `http-enter` against it after any engine
+change. Stop with `docker compose stop`; `down` also stops the DB (course data
+survives in `ww-courses/` + the `webwork2_mysql` volume).
 
 Nothing here has touched a live page yet. The live-validation protocol below
 is the gate before any real set.

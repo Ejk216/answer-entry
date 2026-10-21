@@ -136,16 +136,19 @@ def cmd_http_fetch(args: argparse.Namespace) -> int:
             (out / f"problem-{p.n}.html").write_text(pages[url])
             dumps.append({"n": p.n, "url": url, "text": parsed.text,
                           "blanks": parsed.blanks, "images": parsed.images})
+    (out / "problems.json").write_text(json.dumps(dumps, indent=2))
     if args.figures:
         with tracker.phase("figures"):
             figdir = out / "figures"
             figdir.mkdir(exist_ok=True)
             for d in dumps:
                 for i, src in enumerate(d["images"]):
-                    ext = Path(urllib.parse.urlparse(src).path).suffix or ".img"
-                    (figdir / f"p{d['n']}-{i}{ext}").write_bytes(
-                        engine.get_bytes(src))
-    (out / "problems.json").write_text(json.dumps(dumps, indent=2))
+                    try:
+                        ext = Path(urllib.parse.urlparse(src).path).suffix or ".img"
+                        (figdir / f"p{d['n']}-{i}{ext}").write_bytes(
+                            engine.get_bytes(src))
+                    except Exception as e:  # noqa: BLE001 — one bad image kills nothing
+                        print(f"  warning: figure {src} failed: {e}")
     print(f"fetched {len(dumps)} problems -> {out / 'problems.json'}")
     print("timings:", tracker.summary())
     return 0
@@ -165,13 +168,9 @@ def cmd_http_enter(args: argparse.Namespace) -> int:
         with tracker.phase(f"p{p.n}"):
             r = http_engine.enter_problem(engine, p.n, url, values,
                                           dry_run=args.dry_run,
-                                          confirm_live=args.confirm_live,
                                           tracker=tracker)
         reports.append(dataclasses.asdict(r))
         print(f"problem {p.n}: {r.status} — {r.detail}")
-        if r.status == "withheld":
-            print("re-run with --confirm-live to actually POST (protocol provisional).")
-            break
         if r.status not in ("ok", "submitted", "dry_run_ok"):
             print("stopping: nothing further submitted.", file=sys.stderr)
             break
@@ -236,10 +235,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--figures", action="store_true", help="also download figure images")
     s.set_defaults(func=cmd_http_fetch)
 
-    s = sub.add_parser("http-enter", help="HTTP fill + submit (withholds POSTs without --confirm-live)")
+    s = sub.add_parser("http-enter", help="HTTP fill + submit (validated live on 2.19)")
     s.add_argument("answers")
     s.add_argument("--dry-run", action="store_true", help="preview POST, never submit")
-    s.add_argument("--confirm-live", action="store_true", help="actually POST (protocol provisional)")
     s.add_argument("--only", type=int, nargs="*", default=None)
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_http_enter)
