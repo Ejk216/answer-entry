@@ -231,6 +231,115 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_validate(args: argparse.Namespace) -> int:
+    from .validate import validate_answers
+    answers = load_answers(args.answers)
+    problems = json.loads(Path(args.problems).read_text())
+    result = validate_answers(problems, answers)
+    for e in result.errors:
+        print(f"error: {e}")
+    for w in result.warnings:
+        print(f"warning: {w}")
+    print(f"validate: {len(result.errors)} errors, "
+          f"{len(result.warnings)} warnings "
+          f"({len(answers.problems)} problems checked)")
+    return 1 if result.errors else 0
+
+
+def cmd_recon(args: argparse.Namespace) -> int:
+    """Headed browser + API traffic log. Drive the site yourself; every
+    XHR/fetch request/response lands in JSONL for offline analysis."""
+    log: list[dict] = []
+
+    def on_response(resp) -> None:
+        try:
+            req = resp.request
+            if req.resource_type not in ("xhr", "fetch"):
+                return
+            entry = {"method": req.method, "url": req.url,
+                     "status": resp.status,
+                     "request": (req.post_data or "")[:2000]}
+            try:
+                ctype = resp.headers.get("content-type", "")
+                body = resp.text()
+                entry["response"] = (body[:4000] if "json" in ctype
+                                     else f"<{ctype}, {len(body)} bytes>")
+            except Exception as e:  # noqa: BLE001 — log the failure, keep going
+                entry["response"] = f"<unreadable: {e}>"
+            log.append(entry)
+        except Exception:  # noqa: BLE001 — recon must never break browsing
+            pass
+
+    with HarnessBrowser(headless=False) as b:
+        page = b.new_page()
+        page.on("response", on_response)
+        page.goto(args.url)
+        print("Drive the site (answer, save, navigate), then press Enter here.")
+        try:
+            input()
+        except EOFError:
+            pass
+    out = Path(args.out)
+    out.write_text("\n".join(json.dumps(e) for e in log) + "\n")
+    print(f"captured {len(log)} API calls -> {out}")
+    return 0
+
+
+def cmd_d2l_dump(args: argparse.Namespace) -> int:
+    from . import d2l
+    with HarnessBrowser() as b:
+        page = b.new_page()
+        page.goto(args.url)
+        frame = d2l.find_quiz_frame(page)
+        if frame is None:
+            print("error: no frame holds quiz radios; sign in first?",
+                  file=sys.stderr)
+            return 1
+        dump = d2l.dump_quiz(frame)
+    dump["url"] = args.url
+    if args.json:
+        print(json.dumps(dump, indent=2))
+    else:
+        for q in dump["questions"]:
+            mark = "answered" if q["answered"] else "UNANSWERED"
+            print(f"-- Q{q['n']} [{mark}] {q['stem']}")
+            for i, o in enumerate(q["options"]):
+                tick = " [x]" if o["checked"] else ""
+                print(f"     ({i}) {o['label']!r}{tick}")
+        f = dump["footer"]
+        print(f"footer: {f['raw'] if f else 'no counter found'}")
+        print(f"answered pattern: {dump['answered_pattern']} "
+              f"(confirm against the navigator before entering)")
+    return 0
+
+
+def cmd_d2l_enter(args: argparse.Namespace) -> int:
+    from . import d2l
+    answers = load_answers(args.answers)
+    if not answers.set_url:
+        print("error: answers file needs set_url (the quiz attempt URL)",
+              file=sys.stderr)
+        return 2
+    with HarnessBrowser() as b:
+        report = d2l.enter_quiz(b.new_page(), answers.set_url, answers,
+                                dry_run=args.dry_run)
+    print(f"status: {report['status']} — {report.get('detail', '')}")
+    if args.json:
+        print(json.dumps(report, indent=2))
+    return 0 if report["status"] in ("ok", "dry_run_ok") else 1
+
+
+def cmd_http_status(args: argparse.Namespace) -> int:
+    engine = Engine()
+    rows = http_engine.fetch_set_status(engine, args.set_url)
+    for r in rows:
+        pct = f"{r['percent:g']}%" if r["percent"] is not None else "no score yet"
+        print(f"problem {r['n']}: {pct}")
+    full = sum(1 for r in rows if r["percent"] == 100)
+    print(f"{full}/{len(rows)} at 100%")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="harness", description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
@@ -296,6 +405,31 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--only", type=int, nargs="*", default=None)
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_http_enter)
+
+    s = sub.add_parser("validate", help="offline answers.json check against problems.json")
+    s.add_argument("answers")
+    s.add_argument("--problems", required=True, help="problems.json from http-fetch")
+    s.set_defaults(func=cmd_validate)
+
+    s = sub.add_parser("http-status", help="per-problem scores from a set page (HTTP)")
+    s.add_argument("set_url")
+    s.set_defaults(func=cmd_http_status)
+
+    s = sub.add_parser("recon", help="headed browser that logs API traffic to JSONL")
+    s.add_argument("url")
+    s.add_argument("--out", default="dumps/recon.jsonl", help="output file")
+    s.set_defaults(func=cmd_recon)
+
+    s = sub.add_parser("d2l-dump", help="dump a D2L quiz attempt (shadow-DOM traversal)")
+    s.add_argument("url")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_d2l_dump)
+
+    s = sub.add_parser("d2l-enter", help="D2L fill + Save All (never submits)")
+    s.add_argument("answers", help="answers.json with set_url = attempt URL")
+    s.add_argument("--dry-run", action="store_true", help="plan clicks, make none")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_d2l_enter)
 
     return p
 

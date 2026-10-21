@@ -318,6 +318,72 @@ def enumerate_set(engine: "Engine", set_url: str, tries: int = 3,
     raise ValueError(f"no problem links found at {set_url}")
 
 
+class _SetStatusParser(HTMLParser):
+    """Per-problem percents from a set page. A row counts when it links to a
+    problem (same base/N rule as enumerate_set); its first percent wins."""
+
+    def __init__(self, base_path: str):
+        super().__init__(convert_charrefs=True)
+        self.base_path = base_path
+        self.rows: list[dict[str, Any]] = []
+        self._row: dict[str, Any] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "tr":
+            self._row = {"n": None, "text": []}
+            self.rows.append(self._row)
+        elif tag == "a" and self._row is not None and self._row["n"] is None:
+            href = dict(attrs).get("href") or ""
+            upath = urllib.parse.urlparse(href).path.rstrip("/")
+            m = re.match(re.escape(self.base_path) + r"/(\d+)$", upath)
+            if m:
+                self._row["n"] = int(m.group(1))
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "tr":
+            self._row = None
+
+    def handle_data(self, data: str) -> None:
+        if self._row is not None:
+            s = data.strip()
+            if s:
+                self._row["text"].append(s)
+
+
+PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+
+
+def parse_set_status(html: str, set_url: str) -> list[dict[str, Any]]:
+    """Per-problem status rows from set-page HTML, sorted by n.
+
+    Contract is mock-defined (tests/fixtures/mock_set.html) until a live
+    set page confirms the row shape; rows with no percent parse as None
+    rather than guessing.
+    """
+    base_path = urllib.parse.urlparse(set_url).path.rstrip("/")
+    parser = _SetStatusParser(base_path)
+    parser.feed(html)
+    rows = []
+    for row in parser.rows:
+        if row["n"] is None:
+            continue
+        m = PERCENT_RE.search(" ".join(row["text"]))
+        rows.append({"n": row["n"],
+                     "percent": float(m.group(1)) if m else None})
+    return sorted(rows, key=lambda r: r["n"])
+
+
+def fetch_set_status(engine: "Engine", set_url: str, tries: int = 3,
+                     delay: float = 4.0) -> list[dict[str, Any]]:
+    """Set status with serial retries (set pages bounce like problem pages)."""
+    for _ in range(tries):
+        rows = parse_set_status(engine.get(set_url), set_url)
+        if rows:
+            return rows
+        time.sleep(delay)
+    raise ValueError(f"no problem status rows found at {set_url}")
+
+
 def strip_to_text(html: str) -> str:
     no_script = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
     return re.sub(r"\s+", " ",

@@ -33,10 +33,14 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/fig1.png":
             self._send(b"\x89PNG\r\n\x1a" + b"\0" * 64, "image/png")
         elif self.path in ("/course/set", "/course/set/"):
-            links = "".join(
+            rows = "".join(
+                f"<tr><td>"
                 f'<a href="/course/set/{n}/?effectiveUser=x">Problem {n}</a>'
-                for n in (2, 1, 3))
-            self._send(f"<html><body>{links}</body></html>".encode(), "text/html")
+                f"</td><td>{pct}</td></tr>"
+                for n, pct in ((2, "50%"), (1, "100%"),
+                               (3, "not attempted")))
+            self._send(f"<html><body><table>{rows}</table></body></html>".encode(),
+                       "text/html")
         elif self.path.startswith("/course/set/"):
             html = PROBLEM_HTML
             if self.path == "/course/set/99/":
@@ -193,3 +197,21 @@ def test_enumerate_set(server, engine):
 def test_strip_to_text():
     text = http_engine.strip_to_text(SCORE_HTML)
     assert http_engine.parse_score_text(text)["percent"] == 100
+
+
+def test_parse_set_status_fixture():
+    html = (FIX / "mock_set.html").read_text()
+    rows = http_engine.parse_set_status(html, "http://x/course/set/")
+    assert rows == [{"n": 1, "percent": 100.0},
+                    {"n": 2, "percent": 50.0},
+                    {"n": 3, "percent": None}]
+
+
+def test_fetch_set_status(server, engine):
+    rows = http_engine.fetch_set_status(engine, f"{server}/course/set/")
+    assert rows == [{"n": 1, "percent": 100.0},
+                    {"n": 2, "percent": 50.0},
+                    {"n": 3, "percent": None}]
+    with pytest.raises(ValueError, match="no problem status rows"):
+        http_engine.fetch_set_status(engine, f"{server}/fig1.png",
+                                     tries=1, delay=0)

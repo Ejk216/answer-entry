@@ -5,7 +5,7 @@ description: "Solve and enter answers for online homework in WeBWorK, Top Hat, o
 
 # Online Problem Sets (WeBWorK, Top Hat, d2L Quiz)
 
-Version: 2026-10-21 r2. This skill is five files: this router plus
+Version: 2026-10-21 r3. This skill is five files: this router plus
 `references/webwork.md`, `references/tophat.md`, `references/d2l.md` (entry
 mechanics per platform) and `references/solving.md` (verification and solution
 procedures, needed only in Solve/Check modes). Read the reference for the

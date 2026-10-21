@@ -48,3 +48,20 @@ Verify two ways: the footer's "N of M questions saved" counter, and a per-group 
 ## Navigation is navigator-only
 
 Synthetic wheel `scroll` moves the question pane a few ticks and then stops responding entirely, on both the sequence viewer and the attempt page. Clicking a number in the question navigator reliably jumps the pane. This affects automation only — the user's own mouse scrolls normally, so don't tell them the page is broken. Resizing the window does **not** reflow the iframe; reload after resizing, and expect viewport height to be capped by the physical display regardless of the size requested.
+
+## Handoff to the harness (fast path)
+
+When the user runs the local harness, you solve — it enters. The driver
+(`d2l-dump` / `d2l-enter`) follows this same procedure and never submits.
+Give the user these commands (from `harness/`), then solve from the dump
+they paste back and emit `answers.json` (`set_url` = attempt URL, one
+label-or-`index:N` answer per question):
+
+```bash
+uv run harness d2l-dump '<quiz-attempt-URL>'
+uv run harness d2l-enter answers.json --dry-run
+uv run harness d2l-enter answers.json
+```
+
+First live run on a quiz: confirm the dump's answered pattern against the
+navigator's ✓ / `--` badges before the full enter.

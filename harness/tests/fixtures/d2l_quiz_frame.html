@@ -1,0 +1,81 @@
+<!doctype html>
+<!-- Mock D2L quiz content frame: shadow-DOM questions, triplicated labels,
+     stalled-autosave footer, exact-text Save All next to Submit. -->
+<html><body>
+<p>Quiz: Demo (3 questions)</p>
+
+<quiz-q data-name="q1" data-stem="Question 1: pick green"
+        data-options="red|green|blue" data-checked="0" data-saved="1"></quiz-q>
+<quiz-q data-name="q2" data-stem="Question 2: pick 42"
+        data-options="41|42|43"></quiz-q>
+<quiz-q data-name="q3" data-stem="Question 3: match the spacing"
+        data-options="  7|7  |7"></quiz-q>
+
+<div id="footer">1 of 3 questions saved</div>
+<button id="save-all">Save All Responses</button>
+<button id="submit">Submit Quiz</button>
+
+<script>
+class QuizQ extends HTMLElement {
+  connectedCallback() {
+    const root = this.attachShadow({mode: 'open'});
+    const stem = document.createElement('div');
+    stem.textContent = this.dataset.stem;
+    root.appendChild(stem);
+    const names = this.dataset.name;
+    this.dataset.options.split('|').forEach((label, i) => {
+      const opt = document.createElement('div');
+      const span = document.createElement('span');
+      span.appendChild(document.createTextNode(label.repeat(3)));  // triplicated
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = names;
+      if (String(i) === (this.dataset.checked || '')) radio.checked = true;
+      const saved = document.createElement('span');
+      saved.className = 'saved';
+      saved.textContent = '✓ Saved';
+      if (!this.dataset.saved) saved.hidden = true;
+      opt.append(span, radio, saved);
+      root.appendChild(opt);
+    });
+  }
+}
+customElements.define('quiz-q', QuizQ);
+
+const footer = document.getElementById('footer');
+let saveTimer = null;
+function checkedCount() {
+  let n = 0;
+  document.querySelectorAll('quiz-q').forEach(q => {
+    if (q.shadowRoot.querySelector('input:checked')) n++;
+  });
+  return n;
+}
+function flush() {
+  saveTimer = null;
+  footer.textContent = `${checkedCount()} of 3 questions saved`;
+  document.querySelectorAll('quiz-q').forEach(q => {
+    const answered = !!q.shadowRoot.querySelector('input:checked');
+    q.shadowRoot.querySelectorAll('.saved').forEach(s => {
+      // show the marker beside the checked option only
+      const radio = s.parentElement.querySelector('input');
+      s.hidden = !(answered && radio.checked);
+    });
+  });
+}
+// change events are composed: they cross the shadow boundary to land here
+document.addEventListener('change', e => {
+  if (e.target && e.target.type === 'radio') {
+    clearTimeout(saveTimer);       // rapid clicks keep stalling the flush
+    saveTimer = setTimeout(flush, 400);
+  }
+});
+document.getElementById('save-all').addEventListener('click', () => {
+  clearTimeout(saveTimer);
+  flush();
+});
+document.getElementById('submit').addEventListener('click', () => {
+  window.__submitted = true;
+});
+</script>
+</body></html>

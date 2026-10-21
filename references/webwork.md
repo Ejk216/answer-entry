@@ -62,3 +62,32 @@ Preview validates syntax, never correctness. After the canary passes, Preview on
 `find` "score received message" after submitting — returns "You received a score of N%" cheaply. `All of the answers are correct.` = done. `N of the questions remain unanswered.` = fill didn't land; change method. Finish on the set page for the status table.
 
 On metered attempts, confirm each problem before moving on. On unlimited attempts, entering the whole set and verifying once at the end is faster — the set page shows every status.
+
+## Handoff to the harness (fast path)
+
+When the user runs the local harness, you solve — it enters. Emit the answer
+file as a JSON code block (schema below) so the user can save it as
+`answers.json`, then give the commands. Never hand-transcribe answers into
+chat prose for the user to retype.
+
+```json
+{"problems": [{"n": 1, "url": "<problem-1-url>",
+  "answers": [{"value": "14"}, {"value": "green"},
+              {"value": ["A", "C"], "type": "checkbox"}]}]}
+```
+
+- One entry per blank **in page order** (the fetch dump numbers them).
+- Select/radio: the option **label** exactly as printed, or `index:N`.
+- Checkbox: a list of labels plus `"type": "checkbox"`.
+- `set_url` may replace per-problem `url`s.
+
+Commands for the user (from `harness/`):
+
+```bash
+uv run harness validate answers.json --problems dumps/<SET>/problems.json
+uv run harness http-enter answers.json --only 1   # canary, then the set
+uv run harness http-enter answers.json
+uv run harness http-status '<set-URL>'            # final verification
+```
+
+If `validate` reports errors, fix the answers file — don't proceed to entry.

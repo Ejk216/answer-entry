@@ -10,10 +10,13 @@ problem; every widget is read back and compared before anything submits.
 | Piece | State | Notes |
 |---|---|---|
 | Browser fill + read-back + submit + score | Validated live | 8-problem set, Oct 2026, first-try correct |
-| HTTP engine (fetch/parse/replay/submit) | Validated live | 8/8 first-try on local 2.19, ~10 s mechanical; mock-server tests green |
+| HTTP engine (fetch/parse/replay/submit) | Validated live | Local 8/8 + school HW07-FS26 9/9, ~1 min mechanical |
+| Set enumeration (HTTP) | Validated live | School set page, Oct 2026 |
+| Set status (HTTP) | Mock-tested | `http-status`; confirm row shape on a live set page |
+| Offline `validate` | Tested | Counts, option labels, checkbox shape |
 | Problem-text selectors (browser path) | **Unvalidated** | Candidate cascade; finalize via `probe` |
-| Set enumeration + status | **Unvalidated** | Confirm on a live set page |
-| D2L / Top Hat | Not built | Procedures live in `references/`; roadmap |
+| D2L dump + enter | Fixture-tested | Shadow-DOM traversal, Save All; needs live mapping check |
+| Top Hat | Not built | Procedure in `references/`; roadmap |
 
 ## HTTP engine (no browser)
 
@@ -29,11 +32,16 @@ uv run harness http-auth http://localhost:8080/webwork2/testcourse/
 # answers file. --workers 2 suits school servers; raise for local.
 uv run harness http-fetch https://host/webwork2/Course/Set/ --out dumps/http-set --figures
 
-# Canary problem 1, then the set (a scoreless submit response stops the run:
+# Validate offline (counts, option labels, checkbox shape), then canary
+# problem 1, then the set (a scoreless submit response stops the run:
 # that means the protocol drifted, e.g. a new WeBWorK version)
+uv run harness validate answers.json --problems dumps/http-set/problems.json
 uv run harness http-enter answers.json --dry-run --only 1
 uv run harness http-enter answers.json --only 1
 uv run harness http-enter answers.json
+
+# Confirm per-problem scores on the set page
+uv run harness http-status https://host/webwork2/Course/Set/
 ```
 
 ## Parallel solving
@@ -46,13 +54,38 @@ is self-contained), merge, enter:
 uv run harness split dumps/http-set/problems.json --out dumps/chunks --chunks 3
 # solve chunk-1.answers.json, chunk-2.answers.json, ... in parallel
 uv run harness merge dumps/chunks/chunk-*.answers.json -o answers.json
+uv run harness validate answers.json --problems dumps/http-set/problems.json
 uv run harness http-enter answers.json --only 1   # canary, then the set
 uv run harness http-enter answers.json
 ```
 
-`merge` validates the combined file (shape, duplicates, types) before writing.
+`merge` validates the combined file (shape, duplicates, types) before writing;
+`validate` checks it against what was fetched (counts, option labels).
 
 Every command prints per-phase timings (`fetch / parse / preview / submit`).
+
+## D2L quizzes (Playwright)
+
+Same safety shape as the WeBWorK path, following `references/d2l.md`: one
+shadow-DOM traversal dumps the whole quiz, clicks land via DOM `.click()`,
+bulk entry ends with an exact-text **Save All Responses**, and the driver
+**never submits**.
+
+```bash
+# Sign in once (persistent profile), then dump the attempt page
+uv run harness login https://brightspace.msu.edu/
+uv run harness d2l-dump '<quiz-attempt-URL>'
+
+# Confirm the dump's answered pattern against the navigator's badges
+# (group n = question n), write answers.json (set_url = attempt URL,
+# one label-or-index:N answer per question), then:
+uv run harness d2l-enter answers.json --dry-run
+uv run harness d2l-enter answers.json
+```
+
+Fixture-tested only: the first live run must confirm the group→question
+mapping (compare already-answered groups against the navigator) before a
+full-quiz enter.
 
 ## Local WeBWorK 2.19 (1:1 test environment)
 
@@ -73,9 +106,6 @@ Courses live in `ww-courses/` (bind-mounted). The DemoTest set is the HTTP
 engine's regression target: re-run `http-enter` against it after any engine
 change. Stop with `docker compose stop`; `down` also stops the DB (course data
 survives in `ww-courses/` + the `webwork2_mysql` volume).
-
-Nothing here has touched a live page yet. The live-validation protocol below
-is the gate before any real set.
 
 ## Setup
 
@@ -125,11 +155,17 @@ steps 1–3, useless for validating solving.
 - `src/answer_entry/browser.py` — persistent profile (`harness/.profile/`)
 - `src/answer_entry/model.py` — answers.json schema + validation
 - `src/answer_entry/webwork.py` — inventory, fill, read-back, submit, score
-- `src/answer_entry/cli.py` — `login probe read-problem read-set enter status`
-- `tests/` — schema tests + headless-Chromium fixture tests (`uv run pytest`)
+- `src/answer_entry/http_engine.py` — fetch/parse/replay/submit/status, no browser
+- `src/answer_entry/d2l.py` — quiz dump/enter, Save All, never submits
+- `src/answer_entry/validate.py` — offline answers-vs-fetch check
+- `src/answer_entry/chunks.py` + `timing.py` — split/merge, phase timings
+- `src/answer_entry/cli.py` — all commands (see `harness -h`)
+- `tests/` — schema, mock-server, fixture, timing tests (`uv run pytest`)
 
 ## Roadmap
 
-D2L (JS dump + click + Save All) and Top Hat drivers following the validated
-procedures in `references/d2l.md` / `references/tophat.md`; an MCP wrapper so
-desktop sessions can call the harness as tools.
+Top Hat driver; starts with live API recon (`harness recon <tophat-URL>`,
+drive the assignment, hand the JSONL back for analysis), which may replace
+browser entry entirely. D2L's group→question mapping still needs its live
+confirmation. No MCP wrapper planned — the workflow lives on web Claude,
+which MCP can't reach.
