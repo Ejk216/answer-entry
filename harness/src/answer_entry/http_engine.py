@@ -54,6 +54,8 @@ class _PageParser(HTMLParser):
         self._form: dict[str, Any] | None = None
         self._select: dict[str, Any] | None = None
         self._option: dict[str, Any] | None = None
+        self._label_inputs: list[dict[str, Any]] | None = None
+        self._label_text: list[str] = []
         self._skip = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -74,10 +76,16 @@ class _PageParser(HTMLParser):
                           "fields": [], "text": [], "images": []}
             self.forms.append(self._form)
         elif tag == "input" and self._form is not None:
-            self._form["fields"].append({
+            field = {
                 "tag": "input", "kind": a.get("type", "text").lower(),
                 "name": a.get("name"), "value": a.get("value", ""),
-                "checked": "checked" in a})
+                "checked": "checked" in a}
+            self._form["fields"].append(field)
+            if self._label_inputs is not None and field["kind"] in ("radio", "checkbox"):
+                self._label_inputs.append(field)
+        elif tag == "label" and self._form is not None:
+            self._label_inputs = []
+            self._label_text = []
         elif tag == "select" and self._form is not None:
             self._select = {"tag": "select", "kind": "select",
                             "name": a.get("name"), "options": []}
@@ -98,6 +106,12 @@ class _PageParser(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag == "style":
             self._skip = max(0, self._skip - 1)
+        elif tag == "label" and self._label_inputs is not None:
+            text = " ".join(self._label_text).strip()
+            for field in self._label_inputs:
+                field["label_text"] = text
+            self._label_inputs = None
+            self._label_text = []
         elif tag == "script":
             if getattr(self, "_math", False):
                 self._math = False
@@ -118,6 +132,8 @@ class _PageParser(HTMLParser):
             return
         if getattr(self, "_math", False):
             s = f"$ {s} $"
+        if self._label_inputs is not None:
+            self._label_text.append(s)
         if self._option is not None:
             self._option["label"] += s
             if not self._option["value"]:
@@ -171,10 +187,12 @@ def parse_problem(html: str, url: str, answer_pattern: str = ANSWER_PATTERN) -> 
             blanks.append({"kind": "select", "name": name, "options": g["options"]})
         elif kind == "radio" and name:
             group(radio_groups, name, "radio")["options"].append(
-                {"label": g["value"], "value": g["value"], "checked": g["checked"]})
+                {"label": g.get("label_text") or g["value"], "value": g["value"],
+                 "checked": g["checked"]})
         elif kind == "checkbox" and name:
             group(check_groups, name, "checkbox")["options"].append(
-                {"label": g["value"], "value": g["value"], "checked": g["checked"]})
+                {"label": g.get("label_text") or g["value"], "value": g["value"],
+                 "checked": g["checked"]})
         elif kind in ("text", "textarea") and name:
             # PG names every graded blank AnSwErNNNN; anything else is a
             # control or JS-widget scratch input: replay, never fill.
@@ -192,6 +210,11 @@ def parse_problem(html: str, url: str, answer_pattern: str = ANSWER_PATTERN) -> 
         elif name and kind not in ("password", "file"):
             replay.append((name, g["value"]))
 
+    if not blanks:
+        # A matched form with zero blanks is a diverted/bounce page (school
+        # middleboxes do this transiently), not a problem. Raise so callers
+        # retry instead of silently carrying an empty parse.
+        raise ValueError(f"no answer blanks found at {url}")
     text = "\n".join(form["text"]) or "\n".join(parser.page_text)
     # Form images only: figures render inside the problem. Falling back to
     # page images picks up theme logos.
@@ -256,6 +279,23 @@ def _option_value(blank: dict[str, Any], value: str, what: str) -> str:
     raise ValueError(f"{blank['name']}: no {what} option {value!r}")
 
 
+def get_problem_page(engine: "Engine", url: str, tries: int = 3,
+                   delay: float = 3.0) -> tuple[ParsedProblem, str]:
+    """GET + parse with serial retries. School servers intermittently bounce
+    problem requests to the SSO authenticator; a bounce is transient, never
+    a reason to give up (read-only, zero risk in retrying)."""
+    last: ValueError | None = None
+    for _ in range(tries):
+        html = engine.get(url)
+        try:
+            return parse_problem(html, url), html
+        except ValueError as e:
+            last = e
+            time.sleep(delay)
+    assert last is not None
+    raise last
+
+
 def strip_to_text(html: str) -> str:
     no_script = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
     return re.sub(r"\s+", " ",
@@ -301,18 +341,32 @@ class Engine:
         with self._opener().open(req, timeout=timeout) as r:
             return r.read().decode("utf-8", "replace")
 
-    def fetch_all(self, urls: list[str], workers: int = 8,
+    def fetch_all(self, urls: list[str], workers: int = 2,
                   tracker: Tracker | None = None) -> dict[str, str]:
-        """Parallel GET. Total time ≈ slowest single fetch."""
+        """Parallel GET with one retry per URL. Workers stay low: bursts
+        make school servers bounce requests to SSO re-auth."""
         out: dict[str, str] = {}
+        errors: dict[str, str] = {}
         t0 = time.perf_counter()
 
-        def one(url: str) -> tuple[str, str]:
-            return url, self.get(url)
+        def one(url: str) -> tuple[str, str | None]:
+            last: Exception | None = None
+            for attempt in range(2):
+                try:
+                    return url, self.get(url)
+                except Exception as e:  # noqa: BLE001 — retry once, then report
+                    last = e
+                    time.sleep(2 * (attempt + 1))
+            errors[url] = f"{type(last).__name__}: {last}"
+            return url, None
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             for url, html in pool.map(one, urls):
-                out[url] = html
+                if html is not None:
+                    out[url] = html
+        if errors:
+            raise RuntimeError("fetch failed for: " + ", ".join(
+                f"{u} ({e})" for u, e in errors.items()))
         if tracker is not None:
             tracker.phases["fetch_all"] = tracker.phases.get("fetch_all", 0.0) \
                 + (time.perf_counter() - t0)
@@ -327,14 +381,20 @@ def export_playwright_cookies(pw_cookies: list[dict[str, Any]],
     jar_path = Path(jar_path)
     jar = MozillaCookieJar(jar_path)
     for c in pw_cookies:
+        # Playwright marks session cookies expires=-1; Python would treat
+        # that as already-expired and withhold them. Translate to a true
+        # session cookie (expires=None), which request handling attaches.
+        exp = c.get("expires", None)
+        session = exp is None or exp == -1
         jar.set_cookie(Cookie(
             version=0, name=c["name"], value=c["value"],
             port=None, port_specified=False,
             domain=c.get("domain", ""), domain_specified=bool(c.get("domain")),
             domain_initial_dot=(c.get("domain", "") or "").startswith("."),
             path=c.get("path", "/"), path_specified=True,
-            secure=bool(c.get("secure", False)), expires=c.get("expires", None),
-            discard=False, comment=None, comment_url=None,
+            secure=bool(c.get("secure", False)),
+            expires=None if session else exp,
+            discard=session, comment=None, comment_url=None,
             rest={"HttpOnly": ""} if c.get("httpOnly") else {},
             rfc2109=False))
     jar_path.parent.mkdir(parents=True, exist_ok=True)
@@ -361,10 +421,13 @@ def enter_problem(engine: Engine, n: int, url: str, answers: list[Any],
     drifted (new WeBWorK version?) and stops the run instead of guessing.
     """
     t = tracker or Tracker()
-    with t.phase("fetch"):
-        html = engine.get(url)
-    with t.phase("parse"):
-        parsed = parse_problem(html, url)
+    try:
+        with t.phase("fetch"):
+            parsed, html = get_problem_page(engine, url)
+    except ValueError:
+        return EnterResult(n, url, "fetch_error",
+                           "problem page bounced repeatedly; session may need "
+                           "`harness http-auth`, or the server is throttling")
     if "Login" in html[:2000] and not parsed.blanks:
         return EnterResult(n, url, "login_required",
                            "page has no answer form; run `harness http-auth` first")

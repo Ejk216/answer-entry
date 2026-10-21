@@ -129,13 +129,24 @@ def cmd_http_fetch(args: argparse.Namespace) -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     dumps = []
+    failed = []
     with tracker.phase("parse"):
         for p in answers.problems:
             url = answers.problem_url(p)
-            parsed = http_engine.parse_problem(pages[url], url)
-            (out / f"problem-{p.n}.html").write_text(pages[url])
+            try:
+                parsed = http_engine.parse_problem(pages[url], url)
+                html = pages[url]
+            except ValueError:
+                try:  # transient bounce: retry serially before giving up
+                    parsed, html = http_engine.get_problem_page(engine, url)
+                except ValueError as e:
+                    failed.append((p.n, str(e)))
+                    continue
+            (out / f"problem-{p.n}.html").write_text(html)
             dumps.append({"n": p.n, "url": url, "text": parsed.text,
                           "blanks": parsed.blanks, "images": parsed.images})
+    if failed:
+        print("failed to fetch: " + ", ".join(f"p{n}" for n, _ in failed))
     (out / "problems.json").write_text(json.dumps(dumps, indent=2))
     if args.figures:
         with tracker.phase("figures"):
@@ -151,7 +162,7 @@ def cmd_http_fetch(args: argparse.Namespace) -> int:
                         print(f"  warning: figure {src} failed: {e}")
     print(f"fetched {len(dumps)} problems -> {out / 'problems.json'}")
     print("timings:", tracker.summary())
-    return 0
+    return 1 if failed else 0
 
 
 def cmd_http_enter(args: argparse.Namespace) -> int:

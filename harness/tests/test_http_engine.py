@@ -95,6 +95,9 @@ def test_parse_problem(server, engine):
     assert ("session_key", "sess-1") in parsed.replay_fields
     assert ("user", "student") in parsed.replay_fields
     assert ("Input1", "1") in parsed.replay_fields  # non-answer control: replayed
+    radio = next(b for b in parsed.blanks if b["kind"] == "radio")
+    assert [(o["label"], o["value"]) for o in radio["options"]] == [
+        ("red", "r"), ("green", "g")]  # labels captured from <label> text
     assert sorted(b["label"] for b in parsed.buttons) == [
         "Preview Answers", "Submit Answers"]
     assert parsed.images == [f"{server}/fig1.png"]
@@ -112,7 +115,7 @@ def test_build_submission(server, engine):
     assert fields["AnSwEr0001"] == ["14"]
     assert fields["AnSwEr2"] == ["x^2"]
     assert fields["choice1"] == ["1"]  # label 42 -> option value
-    assert fields["color"] == ["green"]
+    assert fields["color"] == ["g"]  # label green -> option value
     assert fields["opts"] == ["A", "B"]
     assert fields["session_key"] == ["sess-1"]  # replayed opaque field
     assert fields["submitAnswers"] == ["Submit Answers"]
@@ -159,12 +162,19 @@ def test_enter_dry_run_previews_only(server, engine):
 
 
 def test_cookie_export_roundtrip(tmp_path):
+    from urllib.request import Request
     jar_path = tmp_path / "jar.txt"
     export_playwright_cookies(
         [{"name": "session", "value": "abc", "domain": "127.0.0.1",
-          "path": "/", "secure": False, "httpOnly": True}], jar_path)
+          "path": "/", "secure": False, "httpOnly": True, "expires": -1}],
+        jar_path)
     engine = Engine(jar_path=jar_path)
     assert any(c.name == "session" and c.value == "abc" for c in engine.jar)
+    # Playwright's expires=-1 must become an attachable session cookie,
+    # not a permanently-expired one (school Incapsula lesson).
+    req = Request("http://127.0.0.1/course/")
+    engine.jar.add_cookie_header(req)
+    assert "session=abc" in (req.get_header("Cookie") or "")
 
 
 def test_strip_to_text():
