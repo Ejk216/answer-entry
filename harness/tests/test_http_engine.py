@@ -32,6 +32,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/fig1.png":
             self._send(b"\x89PNG\r\n\x1a" + b"\0" * 64, "image/png")
+        elif self.path in ("/course/set", "/course/set/"):
+            links = "".join(
+                f'<a href="/course/set/{n}/?effectiveUser=x">Problem {n}</a>'
+                for n in (2, 1, 3))
+            self._send(f"<html><body>{links}</body></html>".encode(), "text/html")
         elif self.path.startswith("/course/set/"):
             html = PROBLEM_HTML
             if self.path == "/course/set/99/":
@@ -175,6 +180,14 @@ def test_cookie_export_roundtrip(tmp_path):
     req = Request("http://127.0.0.1/course/")
     engine.jar.add_cookie_header(req)
     assert "session=abc" in (req.get_header("Cookie") or "")
+
+
+def test_enumerate_set(server, engine):
+    pairs = http_engine.enumerate_set(engine, f"{server}/course/set/")
+    assert pairs == [(n, f"{server}/course/set/{n}/?effectiveUser=x")
+                     for n in (1, 2, 3)]
+    with pytest.raises(ValueError, match="no problem links"):
+        http_engine.enumerate_set(engine, f"{server}/fig1.png")
 
 
 def test_strip_to_text():

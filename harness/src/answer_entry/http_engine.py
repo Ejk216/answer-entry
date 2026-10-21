@@ -296,6 +296,28 @@ def get_problem_page(engine: "Engine", url: str, tries: int = 3,
     raise last
 
 
+def enumerate_set(engine: "Engine", set_url: str, tries: int = 3,
+                  delay: float = 4.0) -> list[tuple[int, str]]:
+    """Problem (n, url) pairs from a set page. Full hrefs are harvested
+    verbatim — including query strings like ?effectiveUser= — since some
+    problems refuse to serve without them. Retries: set pages bounce to
+    SSO as transiently as problem pages do."""
+    base_path = urllib.parse.urlparse(set_url).path.rstrip("/")
+    for _ in range(tries):
+        html = engine.get(set_url)
+        found: dict[int, str] = {}
+        for m in re.finditer(r'href="([^"]+)"', html):
+            absolute = urllib.parse.urljoin(set_url, m.group(1))
+            upath = urllib.parse.urlparse(absolute).path.rstrip("/")
+            mm = re.match(re.escape(base_path) + r"/(\d+)$", upath)
+            if mm:
+                found[int(mm.group(1))] = absolute
+        if found:
+            return [(n, found[n]) for n in sorted(found)]
+        time.sleep(delay)
+    raise ValueError(f"no problem links found at {set_url}")
+
+
 def strip_to_text(html: str) -> str:
     no_script = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
     return re.sub(r"\s+", " ",

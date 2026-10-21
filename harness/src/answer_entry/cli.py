@@ -8,10 +8,10 @@ import sys
 import urllib.parse
 from pathlib import Path
 
-from . import http_engine, webwork
+from . import chunks, http_engine, webwork
 from .browser import HARNESS_ROOT, HarnessBrowser
 from .http_engine import Engine
-from .model import load_answers
+from .model import load_answers, parse_answers_dict
 from .timing import Tracker
 
 
@@ -121,18 +121,24 @@ def cmd_http_auth(args: argparse.Namespace) -> int:
 
 
 def cmd_http_fetch(args: argparse.Namespace) -> int:
-    answers = load_answers(args.answers)
     engine = Engine()
     tracker = Tracker()
-    urls = [answers.problem_url(p) for p in answers.problems]
-    pages = engine.fetch_all(urls, tracker=tracker)
+    if args.answers.startswith("http"):
+        stubs = [{"n": n, "url": u}
+                 for n, u in http_engine.enumerate_set(engine, args.answers)]
+        print(f"enumerated {len(stubs)} problems from set page")
+    else:
+        answers = load_answers(args.answers)
+        stubs = [{"n": p.n, "url": answers.problem_url(p)} for p in answers.problems]
+    urls = [s["url"] for s in stubs]
+    pages = engine.fetch_all(urls, workers=args.workers, tracker=tracker)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     dumps = []
     failed = []
     with tracker.phase("parse"):
-        for p in answers.problems:
-            url = answers.problem_url(p)
+        for s in stubs:
+            n, url = s["n"], s["url"]
             try:
                 parsed = http_engine.parse_problem(pages[url], url)
                 html = pages[url]
@@ -140,10 +146,10 @@ def cmd_http_fetch(args: argparse.Namespace) -> int:
                 try:  # transient bounce: retry serially before giving up
                     parsed, html = http_engine.get_problem_page(engine, url)
                 except ValueError as e:
-                    failed.append((p.n, str(e)))
+                    failed.append((n, str(e)))
                     continue
-            (out / f"problem-{p.n}.html").write_text(html)
-            dumps.append({"n": p.n, "url": url, "text": parsed.text,
+            (out / f"problem-{n}.html").write_text(html)
+            dumps.append({"n": n, "url": url, "text": parsed.text,
                           "blanks": parsed.blanks, "images": parsed.images})
     if failed:
         print("failed to fetch: " + ", ".join(f"p{n}" for n, _ in failed))
@@ -190,6 +196,32 @@ def cmd_http_enter(args: argparse.Namespace) -> int:
         print(json.dumps({"reports": reports, "timings": tracker.report()}, indent=2))
     bad = [r for r in reports if r["status"] not in ("ok", "dry_run_ok")]
     return 1 if bad else 0
+
+
+def cmd_split(args: argparse.Namespace) -> int:
+    problems = json.loads(Path(args.problems).read_text())
+    parts = chunks.split_problems(problems, args.chunks)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    for i, part in enumerate(parts):
+        (out / chunks.chunk_name(i)).write_text(json.dumps(part, indent=1))
+        (out / chunks.answers_name(i)).write_text(json.dumps(
+            {"problems": [{"n": p["n"], "url": p["url"], "answers": []}
+                           for p in part]}, indent=1))
+        ns = [p["n"] for p in part]
+        print(f"{chunks.chunk_name(i)}: problems {ns[0]}-{ns[-1]} "
+              f"(solve into {chunks.answers_name(i)})")
+    return 0
+
+
+def cmd_merge(args: argparse.Namespace) -> int:
+    dicts = [json.loads(Path(f).read_text()) for f in args.files]
+    merged = chunks.merge_answer_dicts(dicts)
+    answers = parse_answers_dict(merged)  # validates shape, dupes, types
+    Path(args.o).write_text(json.dumps(merged, indent=1))
+    print(f"merged {len(answers.problems)} problems "
+          f"({[p.n for p in answers.problems]}) -> {args.o}")
+    return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -240,11 +272,23 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("url")
     s.set_defaults(func=cmd_http_auth)
 
-    s = sub.add_parser("http-fetch", help="parallel HTTP fetch + parse of every problem in answers.json")
-    s.add_argument("answers")
+    s = sub.add_parser("http-fetch", help="parallel HTTP fetch + parse from answers.json or a set URL")
+    s.add_argument("answers", help="answers.json file or set page URL")
     s.add_argument("--out", default="dumps/http-set", help="output directory")
     s.add_argument("--figures", action="store_true", help="also download figure images")
+    s.add_argument("--workers", type=int, default=2, help="parallel fetch workers")
     s.set_defaults(func=cmd_http_fetch)
+
+    s = sub.add_parser("split", help="split problems.json into chunks for parallel solving")
+    s.add_argument("problems")
+    s.add_argument("--out", default="dumps/chunks", help="output directory")
+    s.add_argument("--chunks", type=int, default=3, help="number of chunks")
+    s.set_defaults(func=cmd_split)
+
+    s = sub.add_parser("merge", help="merge chunk answer files into one validated answers.json")
+    s.add_argument("files", nargs="+", help="chunk-N.answers.json files")
+    s.add_argument("-o", required=True, help="output answers.json")
+    s.set_defaults(func=cmd_merge)
 
     s = sub.add_parser("http-enter", help="HTTP fill + submit (validated live on 2.19)")
     s.add_argument("answers")

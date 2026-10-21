@@ -24,8 +24,10 @@ form replay — no hardcoded field names — with parallel fetch.
 # One-time: sign in through the browser, export cookies to the engine
 uv run harness http-auth http://localhost:8080/webwork2/testcourse/
 
-# Fetch + parse every problem (parallel; saves HTML + problems.json)
-uv run harness http-fetch answers.json --out dumps/http-set --figures
+# Fetch + parse every problem (parallel; saves HTML + problems.json).
+# Pass a set URL directly (links harvested, effectiveUser included) or an
+# answers file. --workers 2 suits school servers; raise for local.
+uv run harness http-fetch https://host/webwork2/Course/Set/ --out dumps/http-set --figures
 
 # Canary problem 1, then the set (a scoreless submit response stops the run:
 # that means the protocol drifted, e.g. a new WeBWorK version)
@@ -33,6 +35,22 @@ uv run harness http-enter answers.json --dry-run --only 1
 uv run harness http-enter answers.json --only 1
 uv run harness http-enter answers.json
 ```
+
+## Parallel solving
+
+Solving is the bottleneck once mechanics take seconds. Split the fetched
+dump, solve chunks simultaneously (parallel agents work well — each chunk
+is self-contained), merge, enter:
+
+```bash
+uv run harness split dumps/http-set/problems.json --out dumps/chunks --chunks 3
+# solve chunk-1.answers.json, chunk-2.answers.json, ... in parallel
+uv run harness merge dumps/chunks/chunk-*.answers.json -o answers.json
+uv run harness http-enter answers.json --only 1   # canary, then the set
+uv run harness http-enter answers.json
+```
+
+`merge` validates the combined file (shape, duplicates, types) before writing.
 
 Every command prints per-phase timings (`fetch / parse / preview / submit`).
 

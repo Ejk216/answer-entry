@@ -204,7 +204,7 @@ Wall-clock is dominated by browser round-trips, not thinking. Spend round-trips 
 
 ## Parallelism
 
-One browser tab means entry stays sequential — parallel agents in the same Chrome would fight over the page. Agents help only for **solving** (split a large multi-set batch across solvers from the bulk-read text) or for an independent second solve on low-attempt numeric problems.
+One browser tab means entry stays sequential — parallel agents in the same Chrome would fight over the page. Agents help only for **solving** (split a large multi-set batch across solvers from the bulk-read text) or for an independent second solve on low-attempt numeric problems. With the harness, entry is serial by design (the school server bounces concurrent requests); solve in parallel via `harness split`/`merge` instead.
 
 ## Improving this skill
 

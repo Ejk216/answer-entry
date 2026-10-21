@@ -56,7 +56,10 @@ class AnswerFile:
 
 
 def load_answers(path: str | Path) -> AnswerFile:
-    raw = json.loads(Path(path).read_text())
+    return parse_answers_dict(json.loads(Path(path).read_text()))
+
+
+def parse_answers_dict(raw: object) -> AnswerFile:
     if not isinstance(raw, dict):
         raise ValueError("answers file must be a JSON object")
     set_url = raw.get("set_url")
