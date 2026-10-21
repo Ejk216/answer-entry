@@ -1,0 +1,36 @@
+<!doctype html>
+<html><body>
+<!-- Mimics the MathQuill v2 API surface the harness drives:
+     MathQuill.getInterface(2).MathField(el) with .write() / .latex().
+     Field f2 deliberately mangles input so tests can prove the
+     read-back mismatch veto fires. -->
+<div class="mq-editable-field" id="f0"></div>
+<div class="mq-editable-field" id="f1"></div>
+<div class="mq-editable-field mangler" id="f2"></div>
+<script>
+window.MathQuill = (() => {
+  const states = new Map();
+  function field(el) {
+    if (!states.has(el)) states.set(el, "");
+    return {
+      write(latex) {
+        let s = states.get(el) + latex;
+        if (el.classList.contains("mangler")) s = s.toUpperCase();
+        states.set(el, s);
+        el.textContent = s;
+      },
+      latex(v) {
+        if (v === undefined) return states.get(el);
+        states.set(el, v);
+        el.textContent = v;
+      },
+      select() { /* fake has no selection; fields start empty */ }
+    };
+  }
+  return { getInterface(v) {
+    if (v !== 2) throw new Error("only v2");
+    return { MathField: field };
+  }};
+})();
+</script>
+</body></html>

@@ -1,0 +1,29 @@
+<!doctype html>
+<html><body>
+<div class="problem-content">
+<p>A widget inventory test. Question 1 of 1.</p>
+</div>
+<form id="answerForm">
+  <select name="q1">
+    <option value="">?</option>
+    <option value="v42">42</option>
+    <option value="v43">43</option>
+  </select>
+  <label><input type="radio" name="color" value="red"> red</label>
+  <label><input type="radio" name="color" value="green"> green</label>
+  <label><input type="radio" name="color" value="blue"> blue</label>
+  <label><input type="checkbox" name="opts" value="A"> A</label>
+  <label><input type="checkbox" name="opts" value="B"> B</label>
+  <label><input type="checkbox" name="opts" value="C"> C</label>
+  <button type="button" id="previewBtn">Preview Answers</button>
+  <input type="submit" value="Submit Answers">
+</form>
+<div id="score"></div>
+<script>
+document.querySelector('input[type=submit]').addEventListener('click', (e) => {
+  e.preventDefault();
+  document.getElementById('score').textContent =
+    'You received a score of 100%. All of the answers are correct.';
+});
+</script>
+</body></html>

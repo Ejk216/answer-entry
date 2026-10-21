@@ -1,0 +1,19 @@
+{
+  "set_url": "https://webwork2.example.edu/webwork2/Course/Set/",
+  "problems": [
+    {
+      "n": 1,
+      "answers": [
+        {"value": "-\\frac{1}{2},3"},
+        {"value": "42", "type": "select"},
+        {"value": "green", "type": "radio"},
+        {"value": ["A", "C"], "type": "checkbox"}
+      ]
+    },
+    {
+      "n": 2,
+      "url": "https://webwork2.example.edu/webwork2/Course/Set/2/",
+      "answers": [{"value": "\\sin(x)"}]
+    }
+  ]
+}

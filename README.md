@@ -30,6 +30,9 @@ problem types.
   mechanics per platform (read only the one you're on)
 - `references/solving.md` — self-verification and solution procedures
   (Solve/Check modes only; Enter mode skips it)
+- `harness/` — scripted WeBWorK read/enter (Playwright, persistent profile).
+  Faster than hand-driven entry with programmatic read-back before submit;
+  see harness/README.md. Optional — the skill works without it.
 
 ## Install
 

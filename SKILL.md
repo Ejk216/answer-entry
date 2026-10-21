@@ -180,7 +180,7 @@ Falling back costs time, not accuracy. Prefer it over guessing.
 
 Wall-clock is dominated by browser round-trips, not thinking. Spend round-trips where attempts are at risk, nowhere else:
 
-1. **Drive widgets from JavaScript where possible.** One JS call beats click-type-screenshot per box and can't misclick from a stale frame. WeBWorK MathQuill fields have a JS API — try it first, canary-gated, with click-type as fallback (references/webwork.md). D2L is JS-driven throughout.
+1. **Prefer the scripted harness where available.** On a machine with the skill repo checked out, `harness/` (see harness/README.md) reads and enters WeBWorK sets deterministically — no screenshots, programmatic read-back before submit. Hand-driven entry below is the fallback for sessions without shell access (e.g. claude.ai web). In hand-driven entry, **drive widgets from JavaScript where possible**: one JS call beats click-type-screenshot per box and can't misclick from a stale frame. WeBWorK MathQuill fields have a JS API — try it first, canary-gated, with click-type as fallback (references/webwork.md). D2L is JS-driven throughout.
 2. **Match verification depth to the stakes.** Metered attempts: confirm each problem's score before moving on. Free attempts: enter everything, verify once at the end.
 3. **Minimise Preview.** After the canary passes, Preview only the first field of each new widget/syntax type and any entry with fractions, radicals or intervals — never plain decimals box-by-box.
 4. **Never re-read what you already hold.** D2L question count comes from the JS dump, not the navigator scrollbar; WeBWorK problem text comes from the bulk read, not re-navigation. End each problem batch navigated to the next problem so its screenshot doubles as the next setup.
