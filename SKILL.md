@@ -5,7 +5,7 @@ description: "Solve and enter answers for online homework in WeBWorK, Top Hat, o
 
 # Online Problem Sets (WeBWorK, Top Hat, d2L Quiz)
 
-Version: 2026-10-21. This skill is five files: this router plus
+Version: 2026-10-21 r2. This skill is five files: this router plus
 `references/webwork.md`, `references/tophat.md`, `references/d2l.md` (entry
 mechanics per platform) and `references/solving.md` (verification and solution
 procedures, needed only in Solve/Check modes). Read the reference for the
@@ -58,9 +58,10 @@ select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_creat
 ```
 
 Then call `tabs_context_mcp` and open a **new tab** for the work — never drive
-the user's own tabs. (If the user points at an already-open tab — "this set" —
-work there instead.) Close tabs you created when done. "One batch" in this
-skill means independent calls issued together in one block.
+the user's own tabs: the user may click or type mid-run and corrupt an entry.
+(If the user points at an already-open tab — "this set" — work there instead.)
+Close tabs you created when done. "One batch" in this skill means independent
+calls issued together in one block.
 
 ### Site permission is the first thing that will stop you (Chrome)
 
@@ -199,6 +200,7 @@ Wall-clock is dominated by browser round-trips, not thinking. Spend round-trips 
 - In `browser_batch`, a `scroll` action **already returns its own screenshot**. Adding a `screenshot` after it duplicates the image and wastes tokens.
 - Coordinates inside a batch refer to the screenshot taken *before* the call. So a batch can click a target you've already seen and then navigate and capture the next view — but it can never click something first revealed inside the same batch.
 - `find` and `read_page` refs stay valid only until the page reloads.
+- Inside `browser_batch`, name sub-actions WITHOUT the `mcp__` prefix (`get_page_text`, not `mcp__claude-in-chrome__get_page_text`) — prefixed names fail on the sidepanel transport.
 
 ## Parallelism
 

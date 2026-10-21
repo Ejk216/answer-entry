@@ -8,14 +8,14 @@ Observed on webwork2 2.19.
 |---|---|---|
 | `<select>` dropdown | `form_input` with the option text | No |
 | Radio / checkbox | `form_input` with `true` on the ref from `find` | No |
-| MathQuill typed box | coordinate `left_click` → `type` | Yes if any fractions/radicals/intervals; optional for plain decimals |
-| Submit button | `left_click` by ref (from `find`) or by coordinate | — |
+| MathQuill typed box | JS API (`.latex('')` then `.write()`); click-type fallback | Yes if any fractions/radicals/intervals; optional for plain decimals |
+| Submit button | JS `#submitAnswers_id` click; `left_click` fallback | — |
 
 - **Never `form_input` a MathQuill box** — it submits blank and burns an attempt.
 - `find` returns dropdown/radio/checkbox refs in page order; option order matches the printed list. Refs are valid until the page reloads.
 - On pages mixing typed boxes and dropdowns, **type first, then `form_input`** (form_input can scroll the page).
 
-## Typed boxes: batching
+## Typed boxes: batching (click-type fallback)
 
 - Plain-decimal fills of several boxes in one batch worked (including two 3×3 contingency tables filled bottom-up in one batch each) — rows don't resize for plain numbers. Screenshot once after the batch to verify every cell.
 - Still **one field per call** when entries contain fractions or radicals (rows grow and shift).
@@ -29,20 +29,21 @@ Observed on webwork2 2.19.
 - Orange dot on the info button = bad parse; trust Preview's popup.
 - To clear a field, **reload the page**.
 
-## Driving MathQuill from JavaScript (experimental, canary-gated)
+## Driving entry from JavaScript (validated primary)
 
-Click-type costs a batch per box plus verification screenshots, and clicks can
-miss from a stale frame. MathQuill fields expose a JS API that may fill a whole
-problem in one `javascript_tool` call. **Unvalidated as of 2026-10-21 — the
-canary rule governs:** prove it on problem 1 (fill via JS, confirm the rendered
-field in Preview, submit, confirm the score) before trusting it across the set.
-On success, use it for the set and update this section with what worked; on any
-doubt, fall back to click-type without spending further attempts on the method.
+Hand-clicking is the fallback. The validated fast path fills a whole problem
+with `javascript_tool` — no screenshots, no coordinates:
 
-1. Find the fields: MathQuill marks editable elements with the `mq-editable-field` class. Enumerate them in page order; if the class isn't present, inspect one answer box's markup before proceeding.
-2. Get the API: `MQ = MathQuill.getInterface(2)`, then `MQ.MathField(el)` per element. If `MathQuill` is undefined on the page, stop and fall back to click-type.
-3. Prefer `.write('…')` over `.latex('…')`: `write` goes through the same keystroke handling as typed input, so page hooks and the hidden answer field update as they would for typing. `latex` sets content directly and may bypass them — canary the exact call you plan to use.
-4. Escape for the API, not the keyboard: the `Right`-after-`/` dance is a typing concern; as LaTeX, `-\frac{1}{2},3` is unambiguous.
+1. **One script per problem** that inventories, fills, and reads back: dump the widgets (MathQuill fields, radios, dropdowns, checkboxes with their input IDs), fill each, and return the hidden values for comparison. A separate dump pass before filling doubles the calls for no reason.
+2. **MathQuill:** `MQ = MathQuill.getInterface(2)`, then per field `.latex('')` to clear and `.write(value)` to fill. Write LaTeX, not keystrokes: `-\frac{1}{2},3` is unambiguous to the API — the `Right`-after-`/` dance is a typing-only concern. **Never set a hidden input's `.value` directly** — the editor state won't match and the submit may carry stale content.
+3. **Radios/checkboxes:** DOM `.click()` on the input. **Dropdowns:** set the matching option value and dispatch a `change` event.
+4. **Submit:** `document.getElementById('submitAnswers_id').click()`. If the call errors, the click may still have gone through — read the page text for the score before retrying (see the timeout rule in SKILL.md).
+5. **Confirm** by reading the page text (`All of the answers are correct` / score), never by trusting the tool result alone.
+
+Validated end-to-end on webwork2 2.19, Oct 2026: 8-problem set, first-try
+correct throughout. The canary rule still governs unfamiliar installs: prove
+the sequence on problem 1 before trusting it across the set. If `MathQuill` is
+undefined on the page, fall back to click-type below.
 
 ## Multi-part problems
 

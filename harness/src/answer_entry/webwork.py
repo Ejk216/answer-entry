@@ -1,8 +1,9 @@
 """Deterministic WeBWorK read/enter.
 
-Status: page-shape selectors are UNVALIDATED (no live page seen yet) and live
-behind the ``probe`` command for finalization. The fill/read-back/submit/score
-logic is validated against local fixtures (see tests/).
+Status: the fill/read-back/submit/score sequence is validated against local
+fixtures AND a live 8-problem set (Oct 2026, webwork2 2.19, first-try correct
+throughout). Page-shape selectors (problem text, set enumeration) are
+UNVALIDATED and live behind the ``probe`` command for finalization.
 
 Safety rule, mirroring the skill's canary: nothing is submitted unless every
 filled widget reads back exactly what was intended.
@@ -92,7 +93,7 @@ _MQ_FILL_JS = """({index, latex}) => {
   if (typeof MathQuill === 'undefined')
     return {ok: false, error: 'MathQuill is undefined on this page'};
   const f = MathQuill.getInterface(2).MathField(el);
-  try { f.select(); } catch (e) { /* no selection API; fields start empty on fresh load */ }
+  f.latex('');  // validated clear-then-write sequence (Oct 2026, webwork2 2.19)
   f.write(latex);
   return {ok: true, readback: f.latex()};
 }"""
@@ -228,6 +229,10 @@ def click_preview(page: "Page") -> bool:
 
 
 def click_submit(page: "Page") -> None:
+    # Validated primary (Oct 2026): WeBWorK names its submit button.
+    if page.evaluate("!!document.getElementById('submitAnswers_id')"):
+        page.evaluate("document.getElementById('submitAnswers_id').click()")
+        return
     btn = page.get_by_role("button", name=SUBMIT_NAME)
     if btn.count():
         btn.first.click()

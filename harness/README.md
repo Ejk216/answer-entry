@@ -10,7 +10,7 @@ problem; every widget is read back and compared before anything submits.
 | Piece | State | Notes |
 |---|---|---|
 | Fill + read-back + submit + score | Validated | 13 tests green vs local fixtures |
-| MathQuill `.write()` entry | Logic validated, page unvalidated | Fixture mimics the v2 API; prove on problem 1 |
+| MathQuill `.latex('')` + `.write()` entry | Validated live | 8-problem set, Oct 2026, first-try correct; canary still governs new installs |
 | Problem-text selectors | **Unvalidated** | Candidate cascade; finalize via `probe` |
 | Set enumeration + status | **Unvalidated** | Confirm on a live set page |
 | D2L / Top Hat | Not built | Procedures live in `references/`; roadmap |
