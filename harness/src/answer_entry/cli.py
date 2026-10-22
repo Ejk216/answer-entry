@@ -124,7 +124,7 @@ def full_auth(url: str, email: str, headed: bool = False) -> dict[str, str]:
         password = okta.keychain_password()
     except ValueError as e:
         return {"status": "no-password", "detail": str(e)}
-    with HarnessBrowser(headless=not headed) as b:
+    with HarnessBrowser(headless=not headed, stealth=True) as b:
         page = b.new_page()
         result = okta.full_login(page, url, email, password)
         if result["status"] != "ok":
@@ -219,7 +219,7 @@ def refresh_auth(url: str, headed: bool = False,
     """
     end = time.time() + timeout_s
     needs_hits = 0
-    with HarnessBrowser(headless=not headed) as b:
+    with HarnessBrowser(headless=not headed, stealth=True) as b:
         page = b.new_page()
         page.goto(url)
         while time.time() < end:

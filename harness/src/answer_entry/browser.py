@@ -16,8 +16,9 @@ PROFILE_DIR = HARNESS_ROOT / ".profile"
 class HarnessBrowser:
     """Chromium against the persistent profile. Use as a context manager."""
 
-    def __init__(self, headless: bool = True):
+    def __init__(self, headless: bool = True, stealth: bool = False):
         self.headless = headless
+        self.stealth = stealth
         self._pw: Playwright | None = None
         self.context: BrowserContext | None = None
 
@@ -30,6 +31,14 @@ class HarnessBrowser:
             viewport={"width": 1440, "height": 900},
             accept_downloads=False,
         )
+        if self.stealth:
+            # Risk engines (Okta included) read automation tells like
+            # navigator.webdriver. Hide the cheapest, most-read signal.
+            # Our own machine, our own session, our own SSO — this only
+            # stops the login from failing for being script-driven.
+            self.context.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', "
+                "{get: () => undefined});")
         return self
 
     def new_page(self) -> "Page":
