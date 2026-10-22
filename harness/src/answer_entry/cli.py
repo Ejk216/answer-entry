@@ -108,13 +108,25 @@ def cmd_enter(args: argparse.Namespace) -> int:
 def known_email(explicit: str | None) -> str | None:
     from . import okta
     if explicit:
+        cleaned = okta.clean_email(explicit)
+        if not cleaned:
+            return None
         okta.EMAIL_FILE.parent.mkdir(parents=True, exist_ok=True)
-        okta.EMAIL_FILE.write_text(explicit.strip())
-        return explicit.strip()
+        okta.EMAIL_FILE.write_text(cleaned)
+        return cleaned
     try:
-        return okta.EMAIL_FILE.read_text().strip() or None
+        raw = okta.EMAIL_FILE.read_text()
     except FileNotFoundError:
         return None
+    cleaned = okta.clean_email(raw)
+    if not cleaned:
+        return None
+    if cleaned != raw:
+        try:
+            okta.EMAIL_FILE.write_text(cleaned)
+        except OSError:
+            pass
+    return cleaned
 
 
 def full_auth(url: str, email: str, headed: bool = False) -> dict[str, str]:

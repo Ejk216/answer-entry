@@ -28,6 +28,16 @@ SWITCH_TEXT = r"verify with something else|other options|select.*authenticator|c
 SMS_TEXT = r"\bSMS\b|text message|^phone$|receive .* sms|send .* sms"
 
 
+def clean_email(raw: str) -> str:
+    """Collapse every whitespace run in a stored/typed address.
+
+    A pasted newline survives str.strip() and Okta renders it as a
+    space in the identifier ("kra me197@msu.edu"), which it rejects.
+    Addresses can't contain whitespace, so collapsing is always safe.
+    """
+    return "".join(raw.split())
+
+
 def keychain_password() -> str:
     """MSU password from the Keychain, or a setup error (never the pw)."""
     try:
@@ -100,6 +110,7 @@ def full_login(page: "Page", url: str, email: str,
                password: str) -> dict[str, str]:
     """One unattended Okta pass. Returns {status, detail}; status is ok,
     flow-changed (with a state dump), or sms-timeout."""
+    email = clean_email(email)
     try:
         page.goto(url)
         page.wait_for_timeout(3000)
