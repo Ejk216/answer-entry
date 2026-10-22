@@ -21,6 +21,12 @@ if TYPE_CHECKING:
 KEYCHAIN_SERVICE = "answer-entry-msu"
 EMAIL_FILE = http_engine.PROFILE_DIR / "okta_email"
 
+# Okta's verify screen defaults to the enrolled authenticator (here: Okta
+# Verify push) with a link to pick another. Observed link/option wordings
+# go here as they're confirmed; misses fail loud via the state dump.
+SWITCH_TEXT = r"verify with something else|other options|select.*authenticator|choose.*authenticator"
+SMS_TEXT = r"\bSMS\b|text message|^phone$|receive .* sms|send .* sms"
+
 
 def keychain_password() -> str:
     """MSU password from the Keychain, or a setup error (never the pw)."""
@@ -103,21 +109,36 @@ def full_login(page: "Page", url: str, email: str,
                      'input[type="password"]'], password, "password")
         page.locator('input[type="submit"], button[type="submit"]'
                      ).first.click()
-        page.wait_for_timeout(3000)
-        # 3. choose the SMS authenticator (skipped if code entry is direct)
-        if _click_text(page, r"select.*authenticator|other options",
-                       "challenge list", timeout_ms=6000):
-            page.wait_for_timeout(1500)
-            if not _click_text(page, r"SMS|text message",
-                               "SMS option", timeout_ms=8000):
-                raise ValueError("SMS authenticator not offered")
+        # 3. switch from the default (push) authenticator to SMS. If no
+        # switch link appears, Okta may already be on code entry.
+        switched = _click_text(page, SWITCH_TEXT, "challenge list",
+                               timeout_ms=12000)
+        if switched:
             page.wait_for_timeout(2000)
-        # 4. request the code when a send button is showing
+            if not _click_text(page, SMS_TEXT, "SMS option",
+                               timeout_ms=10000):
+                raise ValueError("SMS authenticator not offered; "
+                                 f"{page_state(page)}")
+            page.wait_for_timeout(2000)
+            # Phone options sometimes ask voice-vs-SMS next.
+            _click_text(page, SMS_TEXT, "SMS delivery",
+                        timeout_ms=4000)
+            page.wait_for_timeout(1500)
+        # 4. request the code when a send button is showing, then prove
+        # we're on code entry BEFORE waiting (never burn 150s blind).
         mark = sms.latest_rowid()
-        if _click_text(page, r"send code|receive .* sms|send .* sms|resend",
-                       "send code", timeout_ms=5000):
+        if _click_text(page, r"send code|resend", "send code",
+                       timeout_ms=5000):
             mark = sms.latest_rowid()  # codes arrive after the request
             page.wait_for_timeout(2000)
+        code_box = page.locator('input[autocomplete="one-time-code"], '
+                                'input[inputmode="numeric"], '
+                                'input[type="tel"]').first
+        try:
+            code_box.wait_for(state="visible", timeout=10000)
+        except Exception:  # noqa: BLE001 — report the screen, don't wait blind
+            raise ValueError("no code entry showing after SMS choice; "
+                             f"{page_state(page)}")
         # 5. enter the code from the Messages watcher
         try:
             code = sms.wait_for_code(mark, timeout_s=150)
@@ -126,7 +147,7 @@ def full_login(page: "Page", url: str, email: str,
                     "detail": f"{e}; screen: {page_state(page)}"}
         _fill(page, ['input[autocomplete="one-time-code"]',
                      'input[inputmode="numeric"]',
-                     'input[type="tel"]', 'input[type="text"]'],
+                     'input[type="tel"]'],
               code, "code")
         page.locator('input[type="submit"], button[type="submit"]'
                      ).first.click()
