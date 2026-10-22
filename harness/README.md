@@ -12,7 +12,8 @@ problem; every widget is read back and compared before anything submits.
 | Browser fill + read-back + submit + score | Validated live | 8-problem set, Oct 2026, first-try correct |
 | HTTP engine (fetch/parse/replay/submit) | Validated live | Local 8/8 + school HW07-FS26 9/9, ~1 min mechanical |
 | Set enumeration (HTTP) | Validated live | School set page, Oct 2026 |
-| Session auto-refresh | Live-tested (needs-you path) | `ok` path pending a Keep-signed-in login |
+| Unattended Okta+SMS login | Validated live | Full `--full` chain green, Oct 2026 |
+| Cookie-only refresh | Live-tested (needs-you path) | `ok` path triggers on next SP-only expiry |
 | Set status (HTTP) | Validated live | `http-status` on sim 2.19 set page, Oct 2026 |
 | Offline `validate` | Tested | Counts, option labels, checkbox shape |
 | Problem-text selectors (browser path) | **Unvalidated** | Candidate cascade; finalize via `probe` |
