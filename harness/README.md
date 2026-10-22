@@ -58,19 +58,14 @@ School sessions die after a few hours (Incapsula + SSO). Three layers:
 2. **Manual refresh.** `harness http-auth --refresh <url>` does the same
    on demand (retries visibly if headless hits the bot-wall).
 3. **Keep-alive.** `harness keepalive <url>` prints `alive` / `expired
-   (<kind>)` for a scheduler. Example launchd tick every 30 minutes:
+   (<kind>)` for a scheduler and notifies on repeated failure (log:
+   `~/Library/Logs/answer-entry-keepalive.log`). The launchd job
+   (`harness/keepalive.plist`, 30-minute tick) runs keepalive and
+   refreshes on expiry:
 
-```xml
-<!-- ~/Library/LaunchAgents/edu.msu.webwork-keepalive.plist -->
-<dict>
-  <key>Label</key><string>edu.msu.webwork-keepalive</string>
-  <key>StartInterval</key><integer>1800</integer>
-  <key>ProgramArguments</key>
-  <array><string>/bin/sh</string><string>-c</string>
-    <string>cd ~/Developer/webwork-answer-entry/harness &&
-      uv run harness keepalive 'https://SET-URL' ||
-      uv run harness http-auth --refresh 'https://SET-URL'</string></array>
-</dict>
+```bash
+cp harness/keepalive.plist ~/Library/LaunchAgents/edu.msu.webwork-keepalive.plist
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/edu.msu.webwork-keepalive.plist
 ```
 
 One user step makes refreshes reliable: at the next interactive
@@ -97,6 +92,28 @@ uv run harness http-auth --full 'https://SET-URL' --email '<msu-email>'
 `fetch`/`enter`/`status` escalate to this automatically when set up
 (email remembered, Keychain password present). `keepalive` deliberately
 never does — a scheduler must not fire SMS logins on its own.
+
+## Health and recovery
+
+`harness smoke --ww-url <url> --th-code <code>` is the read-only
+health check: sessions, Keychain, Messages access, Top Hat API. It
+never submits or fires logins. Run it before homework when anything
+has been idle, or weekly.
+
+If this Mac dies, everything rebuilds from the repo plus logins:
+
+1. Clone, `uv sync --extra dev`, `uv run playwright install chromium`.
+2. `harness http-auth`, `harness th-auth`, Keychain password, Full Disk
+   Access for the terminal (SMS codes), Friday class cron (lives in
+   the agent session — recreate it).
+3. `cp harness/keepalive.plist ~/Library/LaunchAgents/edu.msu.webwork-keepalive.plist`
+   + `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/...`.
+4. Local sim: `webwork-test-env` is an upstream checkout (never push
+   it); `docker compose up -d` + `provision_test_course.py`.
+
+Machine-local state that does NOT survive (all re-created by the
+steps above): `.profile/` (browser, jars, tokens), Keychain item,
+launchd job, agent cron.
 
 ## Parallel solving
 

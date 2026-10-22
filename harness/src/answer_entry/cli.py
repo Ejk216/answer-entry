@@ -11,7 +11,7 @@ import urllib.parse
 from pathlib import Path
 
 from . import chunks, http_engine, webwork
-from .browser import HARNESS_ROOT, HarnessBrowser
+from .browser import HARNESS_ROOT, PROFILE_DIR, HarnessBrowser
 from .http_engine import Engine
 from .model import load_answers, parse_answers_dict
 from .timing import Tracker
@@ -245,18 +245,121 @@ def prefetch_auth(url: str) -> Engine:
 
 
 def cmd_keepalive(args: argparse.Namespace) -> int:
+    import subprocess as _subprocess
+    state_file = PROFILE_DIR / "keepalive_state.json"
+    try:
+        state = json.loads(state_file.read_text())
+    except (FileNotFoundError, ValueError):
+        state = {"consecutive_failures": 0}
     engine = Engine()
     try:
         html = engine.get(args.url)
     except Exception as e:  # noqa: BLE001 — report, don't crash from cron
         print(f"expired (fetch failed: {e})")
-        return 1
-    kind = http_engine.auth_failure_kind(html)
-    if kind is None:
-        print("alive")
-        return 0
-    print(f"expired ({kind})")
-    return 1
+        failed = True
+    else:
+        kind = http_engine.auth_failure_kind(html)
+        failed = kind is not None
+        print("alive" if not failed else f"expired ({kind})")
+    state["consecutive_failures"] = state.get("consecutive_failures", 0) + 1 \
+        if failed else 0
+    try:
+        state_file.write_text(json.dumps(state))
+    except OSError:
+        pass
+    if failed and state["consecutive_failures"] >= 2:
+        # Rot that pages instead of festering: two bad ticks in a row
+        # means refresh isn't healing it. Best effort, never fatal.
+        try:
+            _subprocess.run(
+                ["osascript", "-e",
+                 'display notification "WeBWorK session expired and '
+                 "auto-refresh isn't healing it. Run harness http-auth.\" "
+                 'with title "answer-entry keepalive"'], timeout=15,
+                capture_output=True)
+        except Exception:  # noqa: BLE001 — notification is a courtesy
+            pass
+    return 1 if failed else 0
+
+
+def run_smoke(checks: list[tuple[str, object]]) -> list[dict[str, object]]:
+    """Run named zero-arg check callables -> [{name, ok, detail}].
+
+    A check returns (ok, detail); raised exceptions become failures.
+    Everything here must be read-only: smoke never submits, never
+    fires SMS logins, never writes sessions.
+    """
+    results = []
+    for name, fn in checks:
+        assert callable(fn)
+        try:
+            ok, detail = fn()  # type: ignore[misc]
+        except Exception as e:  # noqa: BLE001 — a crashed check is a failed check
+            ok, detail = False, f"{type(e).__name__}: {e}"
+        results.append({"name": name, "ok": bool(ok), "detail": str(detail)})
+    return results
+
+
+def cmd_smoke(args: argparse.Namespace) -> int:
+    import subprocess as _subprocess
+    from . import okta as _okta, sms as _sms
+
+    def ww():
+        html = Engine().get(args.ww_url)
+        kind = http_engine.auth_failure_kind(html)
+        return kind is None, "alive" if kind is None else f"expired ({kind})"
+
+    def keychain():
+        r = _subprocess.run(
+            ["security", "find-generic-password", "-s",
+             _okta.KEYCHAIN_SERVICE, "-w"],
+            capture_output=True, text=True, timeout=15)
+        return r.returncode == 0, ("present" if r.returncode == 0
+                                   else "missing (see Unattended Okta login)")
+
+    def smsdb():
+        n = _sms.latest_rowid()
+        return True, f"readable (marker {n})"
+
+    def thjwt():
+        from . import tophat as _th
+        try:
+            tokens = json.loads(_th.TOKEN_FILE.read_text())
+        except (FileNotFoundError, ValueError):
+            return False, "no saved tokens (run th-auth)"
+        left = _th.token_expiry(tokens.get("access", "")) - time.time()
+        if left > 3600:
+            return True, f"fresh ({left / 3600:.1f}h left)"
+        # Stale-between-uses is the normal idle state: th-* commands
+        # refresh from the profile on next use. Not a failure.
+        return True, "stale, refreshes on next use"
+
+    checks: list[tuple[str, object]] = [
+        ("webwork", ww), ("keychain", keychain), ("sms-db", smsdb)]
+    if args.ww_url == "skip":
+        checks = [c for c in checks if c[0] != "webwork"]
+    if args.th_code:
+        def thapi():
+            from . import tophat as _th
+            tokens = json.loads(_th.TOKEN_FILE.read_text())
+            if _th.token_expiry(tokens.get("access", "")) < time.time() + 60:
+                return True, "skipped (token sleeps; refreshes on use)"
+            # Static token: smoke observes, never refreshes or writes.
+            client = _th.Client(
+                token_provider=lambda: tokens.get("access", ""))
+            course = client.course_id(args.th_code)
+            tree = client.tree(course)
+            return True, (f"course {course}, "
+                          f"{len(tree.get('children', []))} roots")
+        checks.extend([("tophat-jwt", thjwt), ("tophat-api", thapi)])
+    else:
+        checks.append(("tophat-jwt", thjwt))
+    results = run_smoke(checks)
+    for r in results:
+        print(f"[{'ok' if r['ok'] else 'FAIL'}] {r['name']}: {r['detail']}")
+    bad = [r for r in results if not r["ok"]]
+    print(f"smoke: {len(results) - len(bad)}/{len(results)} pass")
+    return 1 if bad else 0
 
 
 def cmd_http_fetch(args: argparse.Namespace) -> int:
@@ -662,6 +765,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("keepalive", help="report whether the HTTP session is alive (for cron)")
     s.add_argument("url")
     s.set_defaults(func=cmd_keepalive)
+
+    s = sub.add_parser("smoke", help="read-only health of sessions/credentials/APIs")
+    s.add_argument("--ww-url", default="skip", help="WeBWorK page to probe")
+    s.add_argument("--th-code", default=None, help="Top Hat public code")
+    s.set_defaults(func=cmd_smoke)
 
     s = sub.add_parser("http-fetch", help="parallel HTTP fetch + parse from answers.json or a set URL")
     s.add_argument("answers", help="answers.json file or set page URL")

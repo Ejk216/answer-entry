@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Source of truth: copy to ~/Library/LaunchAgents/ and bootstrap (see README). -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>edu.msu.webwork-keepalive</string>
+  <key>StartInterval</key><integer>1800</integer>
+  <key>ProgramArguments</key>
+  <array><string>/bin/sh</string><string>-c</string>
+    <string>cd /Users/ethankramer/Developer/webwork-answer-entry/harness &amp;&amp; /Users/ethankramer/.local/bin/uv run harness keepalive 'https://webwork2c.math.msu.edu/webwork2/stt_200_fs26_998/HW07-FS26/1?effectiveUser=krame197' &gt;&gt;/Users/ethankramer/Library/Logs/answer-entry-keepalive.log 2&gt;&amp;1 || /Users/ethankramer/.local/bin/uv run harness http-auth --refresh 'https://webwork2c.math.msu.edu/webwork2/stt_200_fs26_998/HW07-FS26/1?effectiveUser=krame197' &gt;&gt;/Users/ethankramer/Library/Logs/answer-entry-keepalive.log 2&gt;&amp;1; echo "--- $(date)" &gt;&gt;/Users/ethankramer/Library/Logs/answer-entry-keepalive.log</string></array>
+</dict>
+</plist>

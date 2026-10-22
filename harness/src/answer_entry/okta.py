@@ -110,6 +110,16 @@ def full_login(page: "Page", url: str, email: str,
         try:
             _fill(page, ['input[name="identifier"]', 'input[type="email"]'],
                   email, "identifier")
+            # "Keep me signed in" extends the SSO session for weeks, so
+            # future cookie-only refreshes heal alone. Best effort.
+            try:
+                box = page.locator(
+                    'input[name="rememberMe"], input[type="checkbox"]'
+                    ).first
+                if box.count() and not box.is_checked():
+                    box.check()
+            except Exception:  # noqa: BLE001 — the login works regardless
+                pass
             page.locator('input[type="submit"], button[type="submit"]'
                          ).first.click()
             page.wait_for_timeout(2500)

@@ -205,7 +205,8 @@ class Client:
                     detail = ""
                 hint = (" (item not in an open assignment: past-due, "
                         "unreleased, or review-closed)"
-                        if e.code == 403 else "")
+                        if e.code == 403 and "/content-delivery/" in path
+                        else "")
                 raise ValueError(
                     f"{method} {path}: HTTP {e.code} {detail}{hint}") from e
         raise AssertionError("unreachable")
