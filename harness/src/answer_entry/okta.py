@@ -78,14 +78,27 @@ def _fill(page: "Page", selectors: list[str], value: str, what: str,
         try:
             loc.wait_for(state="visible", timeout=8000)
             if human:
-                # Trusted keystrokes for bot-sensitive fields; length-only
-                # read-back proves the fill landed without exposing it.
+                # Trusted keystrokes for bot-sensitive fields. Clear with
+                # human-like select-all + delete first: autofill or a
+                # previous attempt may have left content behind, and
+                # appending to it submits a doubled secret. Read-back
+                # proves exactly one copy landed (compared in memory,
+                # never logged) — abort instead of submitting known-wrong,
+                # since each submit burns Okta lockout budget.
                 loc.click()
+                loc.press("ControlOrMeta+A")
+                loc.press("Backspace")
                 loc.press_sequentially(value, delay=12)
-                if not loc.input_value():
-                    raise ValueError(f"{what}: fill did not land")
+                if loc.input_value() != value:
+                    raise ValueError(
+                        f"{what}: fill did not land as typed, not "
+                        "submitting")
             else:
                 loc.fill(value)
+                if loc.input_value() != value:
+                    raise ValueError(
+                        f"{what}: fill did not land as typed, not "
+                        "submitting")
             return
         except ValueError:
             raise

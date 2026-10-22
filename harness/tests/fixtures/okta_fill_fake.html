@@ -1,0 +1,8 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>okta fill fixture</title>
+<!-- prefilled: simulates autofill / leftover content in the password box -->
+<input type="password" name="credentials.passcode" id="pw" value="stale-leftover">
+<!-- greedy: simulates a field that mangles keystrokes; must fail loud -->
+<input type="password" id="greedy" oninput="if(!this.dataset.x){this.dataset.x=1;this.value=this.value+'!';}">
+<input type="email" name="identifier" id="email" value="">
