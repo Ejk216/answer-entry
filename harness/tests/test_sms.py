@@ -1,4 +1,5 @@
 """SMS watcher tests against a scratch SQLite db (real chat.db untouched)."""
+import shutil
 import sqlite3
 import time
 
@@ -50,3 +51,32 @@ def test_wait_times_out(db):
     with pytest.raises(TimeoutError, match="no SMS verification code"):
         sms.wait_for_code(mark, timeout_s=1, poll_s=0.1, db_path=db)
     assert time.monotonic() - t0 < 5
+
+
+@pytest.mark.skipif(shutil.which("sqlite3") is None, reason="no sqlite3 CLI")
+def test_cli_fallback_when_module_blocked(db, monkeypatch):
+    import sqlite3 as _sqlite3
+
+    def blocked(*a, **k):
+        raise _sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(_sqlite3, "connect", blocked)
+    import subprocess
+    mark = sms.latest_rowid(db_path=db)
+    subprocess.run(["sqlite3", str(db), "insert into message values "
+                    "('Your verification code is 444444', 'SMS', 3, 0)"],
+                   check=True)
+    assert sms.wait_for_code(mark, timeout_s=5, poll_s=0.1,
+                             db_path=db) == "444444"
+
+
+def test_clear_error_when_fully_blocked(db, monkeypatch):
+    import sqlite3 as _sqlite3
+
+    def blocked(*a, **k):
+        raise _sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(_sqlite3, "connect", blocked)
+    monkeypatch.setattr(sms.shutil, "which", lambda _: None)
+    with pytest.raises(PermissionError, match="Full Disk Access"):
+        sms.latest_rowid(db_path=db)

@@ -142,6 +142,8 @@ def full_login(page: "Page", url: str, email: str,
                                   f"{page_state(page)}"}
         return {"status": "flow-changed",
                 "detail": f"no app content after code; {page_state(page)}"}
+    except PermissionError as e:
+        return {"status": "sms-blocked", "detail": str(e)}
     except ValueError as e:
         return {"status": "flow-changed",
                 "detail": f"{e}; {page_state(page)}"}
