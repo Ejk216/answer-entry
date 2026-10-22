@@ -223,6 +223,12 @@ pricing (~$0.10/$0.20 per MTok) means Meta trains on prompts and
 completions — that tradeoff is the user's explicit choice. Fetched
 `current` values are stripped before solving (the model must solve,
 not copy). Worst-case cost is refused up front against `--max-usd`.
+Empty contributor-tier responses retry (prompt caching makes it ~free).
+
+Benchmark, sim DemoTest 8 problems, Oct 2026 (live grades, unlimited
+attempts): Meta contributor 7/8 ok (interactive oracle correctly
+held), $0.0012, ~56 s; Sonnet 5/8 ok (both figure problems wrong),
+$0.027, ~20 s. Meta reads figures better here at 1/22nd the cost.
 
 ## Local WeBWorK 2.19 (1:1 test environment)
 
