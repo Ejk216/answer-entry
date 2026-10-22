@@ -93,6 +93,7 @@ uv run harness http-status '<set-URL>'            # final verification
 If `validate` reports errors, fix the answers file — don't proceed to entry.
 
 School sessions expire after a few hours; commands detect it and try a
-headless refresh on their own. If that reports it needs the user, run
-`http-auth --refresh` first and fall back to an interactive `http-auth`
-(check "Keep me signed in" so future refreshes heal alone).
+headless refresh on their own, then one unattended Okta+SMS login when
+set up. If that reports it needs the user, run `http-auth --refresh`
+first and fall back to an interactive `http-auth` (check "Keep me
+signed in" so future refreshes heal alone).

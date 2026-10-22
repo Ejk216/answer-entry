@@ -104,7 +104,51 @@ def cmd_enter(args: argparse.Namespace) -> int:
     return 1 if bad else 0
 
 
+def known_email(explicit: str | None) -> str | None:
+    from . import okta
+    if explicit:
+        okta.EMAIL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        okta.EMAIL_FILE.write_text(explicit.strip())
+        return explicit.strip()
+    try:
+        return okta.EMAIL_FILE.read_text().strip() or None
+    except FileNotFoundError:
+        return None
+
+
+def full_auth(url: str, email: str) -> dict[str, str]:
+    """Unattended Okta email/password/SMS login, then export the jar."""
+    from . import okta
+    try:
+        password = okta.keychain_password()
+    except ValueError as e:
+        return {"status": "no-password", "detail": str(e)}
+    with HarnessBrowser(headless=True) as b:
+        page = b.new_page()
+        result = okta.full_login(page, url, email, password)
+        if result["status"] != "ok":
+            return result
+        assert b.context is not None
+        jar = http_engine.export_playwright_cookies(b.context.cookies())
+    probe = Engine(jar_path=jar).get(url)
+    if http_engine.auth_failure_kind(probe) is None:
+        return {"status": "ok", "detail": "full login complete, jar saved"}
+    return {"status": "flow-changed",
+            "detail": "browser finished but HTTP still fails"}
+
+
 def cmd_http_auth(args: argparse.Namespace) -> int:
+    if args.full:
+        email = known_email(args.email)
+        if email is None:
+            print("error: pass --email '<msu-email>' once; it is remembered",
+                  file=sys.stderr)
+            return 2
+        print(f"unattended Okta login as {email} (one attempt, SMS code "
+              f"from Messages)...")
+        result = full_auth(args.url, email)
+        print(f"full login: {result['status']} — {result['detail']}")
+        return 0 if result["status"] == "ok" else 1
     if args.refresh:
         result = refresh_auth(args.url, headed=False)
         if result["status"] != "ok" and "bot-wall" in result.get("detail", ""):
@@ -171,23 +215,33 @@ def refresh_auth(url: str, headed: bool = False,
 
 
 def prefetch_auth(url: str) -> Engine:
-    """Engine with a live session: auto-refresh once on expiry, else fail
-    with the exact user command. Call before any HTTP run."""
+    """Engine with a live session. On expiry: headless refresh first,
+    then one unattended Okta+SMS login when set up, else the exact user
+    command. Call before any HTTP run. keepalive never calls this — a
+    scheduler must not fire SMS logins on its own."""
     engine = Engine()
     try:
         html = engine.get(url)
-    except Exception as e:  # noqa: BLE001 — network errors aren't auth errors
+    except Exception:  # noqa: BLE001 — network errors aren't auth errors
         return engine
     if http_engine.auth_failure_kind(html) is None:
         return engine
     print("session expired; attempting headless refresh...")
     result = refresh_auth(url)
     print(f"refresh: {result['status']} — {result['detail']}")
-    if result["status"] != "ok":
-        raise ValueError(
-            "session expired and auto-refresh needs you: run "
-            f"`harness http-auth '{url}'` (check 'Keep me signed in')")
-    return Engine()
+    if result["status"] == "ok":
+        return Engine()
+    email = known_email(None)
+    if result["status"] == "needs-you" and email is not None:
+        print("refresh needs you; attempting one Okta+SMS login...")
+        full = full_auth(url, email)
+        print(f"full login: {full['status']} — {full['detail']}")
+        if full["status"] == "ok":
+            return Engine()
+    raise ValueError(
+        "session expired and unattended login is not set up or failed: run "
+        f"`harness http-auth '{url}'` (check 'Keep me signed in'), or set "
+        "up `http-auth --full` with --email plus a Keychain password")
 
 
 def cmd_keepalive(args: argparse.Namespace) -> int:
@@ -600,6 +654,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("url")
     s.add_argument("--refresh", action="store_true",
                    help="cookie-only SSO re-dance, no interaction")
+    s.add_argument("--full", action="store_true",
+                   help="unattended Okta+SMS login (needs --email, Keychain pw)")
+    s.add_argument("--email", default=None, help="MSU email (remembered)")
     s.set_defaults(func=cmd_http_auth)
 
     s = sub.add_parser("keepalive", help="report whether the HTTP session is alive (for cron)")

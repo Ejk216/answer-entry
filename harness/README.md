@@ -78,6 +78,25 @@ extends the SSO session for weeks, so the cookie-only dance heals
 every SP expiry without you. Without it, refresh correctly reports
 `needs-you` and you sign in again.
 
+## Unattended Okta login (email + password + SMS code)
+
+When the SSO session itself is dead, `http-auth --full` performs one
+complete Okta pass: email, Keychain password, SMS authenticator, and
+the code read from the Mac Messages database (iPhone texts land there
+within seconds). Single attempt, no retries — SSO hammering risks
+lockout, so anything unexpected aborts with a screen dump instead.
+
+One-time setup (password never touches files or logs):
+
+```bash
+security add-generic-password -s answer-entry-msu -a '<msu-email>' -w
+uv run harness http-auth --full 'https://SET-URL' --email '<msu-email>'
+```
+
+`fetch`/`enter`/`status` escalate to this automatically when set up
+(email remembered, Keychain password present). `keepalive` deliberately
+never does — a scheduler must not fire SMS logins on its own.
+
 ## Parallel solving
 
 Solving is the bottleneck once mechanics take seconds. Split the fetched
@@ -213,6 +232,7 @@ steps 1–3, useless for validating solving.
 - `src/answer_entry/http_engine.py` — fetch/parse/replay/submit/status, no browser
 - `src/answer_entry/d2l.py` — quiz dump/enter, Save All, never submits
 - `src/answer_entry/tophat.py` — JWT API client: tree, fetch, submit, status
+- `src/answer_entry/okta.py` + `sms.py` — unattended Okta+SMS login
 - `src/answer_entry/validate.py` — offline answers-vs-fetch check
 - `src/answer_entry/chunks.py` + `timing.py` — split/merge, phase timings
 - `src/answer_entry/cli.py` — all commands (see `harness -h`)
