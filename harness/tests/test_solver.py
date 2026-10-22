@@ -68,6 +68,26 @@ def test_shape_errors():
         solve_problems(provider("not json {{{", usage={}), PROBLEMS)
 
 
+def test_empty_output_retried_with_summed_usage():
+    calls = []
+
+    def transport(url, headers, body):
+        calls.append(1)
+        if len(calls) == 1:
+            text, usage = "", {"input_tokens": 100, "output_tokens": 50}
+        else:
+            text, usage = json.dumps(BODY), {"input_tokens": 100,
+                                             "output_tokens": 60}
+        return 200, {"content": [{"type": "text", "text": text}],
+                     "usage": usage}
+
+    r = solve_problems(Provider(api_key="k", transport=transport),
+                       PROBLEMS)
+    assert [p["n"] for p in r.problems] == [1, 2]
+    assert (r.input_tokens, r.output_tokens) == (200, 110)
+    assert len(calls) == 2
+
+
 def test_cap_refuses_before_spending():
     called = []
     p = provider(seen=called)

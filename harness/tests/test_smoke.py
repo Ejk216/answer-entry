@@ -8,6 +8,17 @@ def test_all_pass():
     assert [(r["name"], r["ok"]) for r in out] == [("a", True), ("b", True)]
 
 
+def test_sso_spacing(tmp_path):
+    from answer_entry.cli import sso_clear
+    stamp = tmp_path / "sso"
+    assert sso_clear(stamp_path=stamp) is None
+    msg = sso_clear(stamp_path=stamp)
+    assert msg is not None and "wait" in msg
+    assert sso_clear(True, stamp_path=stamp) is None
+    stamp.write_text("0")
+    assert sso_clear(stamp_path=stamp) is None
+
+
 def test_failure_and_crash():
     def boom():
         raise RuntimeError("kaput")

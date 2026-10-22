@@ -240,14 +240,28 @@ def solve_problems(provider: Provider, problems: list[dict[str, Any]],
         raise ValueError(
             f"solve would risk ${worst:.2f} over the ${policy.max_usd:.2f} "
             f"cap; raise --max-usd or split the set")
-    body = provider.complete(SYSTEM, user, policy.max_tokens)
-    text = "".join(b.get("text", "") for b in body.get("content", [])
-                   if b.get("type") == "text")
-    try:
-        raw = json.loads(_strip_fences(text))
-        solved = raw["problems"]
-    except (ValueError, KeyError, TypeError) as e:
-        raise ValueError(f"solver returned unparsable output: {e}") from e
+    last_error: ValueError | None = None
+    solved: list[dict[str, Any]] = []
+    total_in = total_out = 0
+    # Contributor-tier calls occasionally come back with empty text;
+    # prompt caching makes a retry cost almost nothing.
+    for _ in range(3):
+        body = provider.complete(SYSTEM, user, policy.max_tokens)
+        usage = body.get("usage", {})
+        total_in += usage.get("input_tokens", 0)
+        total_out += usage.get("output_tokens", 0)
+        text = "".join(b.get("text", "") for b in body.get("content", [])
+                       if b.get("type") == "text")
+        try:
+            raw = json.loads(_strip_fences(text))
+            solved = raw["problems"]
+            last_error = None
+            break
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            last_error = ValueError(
+                f"solver returned unparsable output: {e}")
+    if last_error is not None:
+        raise last_error
     by_n = {p["n"]: p for p in problems}
     out: list[dict[str, Any]] = []
     work: list[dict[str, Any]] = []
@@ -274,11 +288,9 @@ def solve_problems(provider: Provider, problems: list[dict[str, Any]],
     missing = sorted(set(by_n) - {e["n"] for e in solved})
     if missing:
         raise ValueError(f"solver skipped problems {missing}")
-    usage = body.get("usage", {})
-    itok, otok = usage.get("input_tokens", 0), usage.get("output_tokens", 0)
-    cost = itok / 1e6 * in_price + otok / 1e6 * out_price
+    cost = total_in / 1e6 * in_price + total_out / 1e6 * out_price
     out.sort(key=lambda p: p["n"])
     work.sort(key=lambda p: p["n"])
     return SolveResult(problems=out, work=work, held=sorted(held),
-                       input_tokens=itok, output_tokens=otok,
+                       input_tokens=total_in, output_tokens=total_out,
                        cost_usd=cost, model=provider.model)

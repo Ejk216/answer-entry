@@ -117,14 +117,14 @@ def known_email(explicit: str | None) -> str | None:
         return None
 
 
-def full_auth(url: str, email: str) -> dict[str, str]:
+def full_auth(url: str, email: str, headed: bool = False) -> dict[str, str]:
     """Unattended Okta email/password/SMS login, then export the jar."""
     from . import okta
     try:
         password = okta.keychain_password()
     except ValueError as e:
         return {"status": "no-password", "detail": str(e)}
-    with HarnessBrowser(headless=True) as b:
+    with HarnessBrowser(headless=not headed) as b:
         page = b.new_page()
         result = okta.full_login(page, url, email, password)
         if result["status"] != "ok":
@@ -138,7 +138,38 @@ def full_auth(url: str, email: str) -> dict[str, str]:
             "detail": "browser finished but HTTP still fails"}
 
 
+SSO_MIN_GAP = 600  # min seconds between SSO dances (account safety)
+
+
+def sso_clear(force: bool = False,
+              stamp_path: Path | None = None) -> str | None:
+    """None when an SSO dance may proceed (stamps now); else wait message.
+
+    Rapid stacked dances (agent tick + manual + retry) look botty to
+    Okta and risk lockout. One logical command run = one dance budget:
+    internal refresh-then-full escalation shares it.
+    """
+    stamp = stamp_path or PROFILE_DIR / "sso_last_attempt"
+    try:
+        last = float(stamp.read_text())
+    except (FileNotFoundError, ValueError):
+        last = 0.0
+    wait = SSO_MIN_GAP - (time.time() - last)
+    if wait > 0 and not force:
+        return (f"last SSO dance {int(time.time() - last)}s ago; wait "
+                f"{int(wait)}s or pass --force")
+    try:
+        stamp.write_text(str(time.time()))
+    except OSError:
+        pass
+    return None
+
+
 def cmd_http_auth(args: argparse.Namespace) -> int:
+    msg = sso_clear(args.force)
+    if msg is not None:
+        print(f"error: {msg}", file=sys.stderr)
+        return 2
     if args.full:
         email = known_email(args.email)
         if email is None:
@@ -147,12 +178,13 @@ def cmd_http_auth(args: argparse.Namespace) -> int:
             return 2
         print(f"unattended Okta login as {email} (one attempt, SMS code "
               f"from Messages)...")
-        result = full_auth(args.url, email)
+        result = full_auth(args.url, email, headed=args.headed)
         print(f"full login: {result['status']} — {result['detail']}")
         return 0 if result["status"] == "ok" else 1
     if args.refresh:
-        result = refresh_auth(args.url, headed=False)
-        if result["status"] != "ok" and "bot-wall" in result.get("detail", ""):
+        result = refresh_auth(args.url, headed=args.headed)
+        if (result["status"] != "ok" and not args.headed
+                and "bot-wall" in result.get("detail", "")):
             print("headless hit the bot-wall; retrying visibly...")
             result = refresh_auth(args.url, headed=True)
         print(f"refresh: {result['status']} — {result['detail']}")
@@ -227,6 +259,10 @@ def prefetch_auth(url: str) -> Engine:
         return engine
     if http_engine.auth_failure_kind(html) is None:
         return engine
+    msg = sso_clear(False)
+    if msg is not None:
+        raise ValueError(f"session expired and SSO is cooling down: {msg}; "
+                         f"rerun shortly")
     print("session expired; attempting headless refresh...")
     result = refresh_auth(url)
     print(f"refresh: {result['status']} — {result['detail']}")
@@ -950,6 +986,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--full", action="store_true",
                    help="unattended Okta+SMS login (needs --email, Keychain pw)")
     s.add_argument("--email", default=None, help="MSU email (remembered)")
+    s.add_argument("--force", action="store_true",
+                   help="override the SSO dance spacing guard")
+    s.add_argument("--headed", action="store_true",
+                   help="visible browser (more human signals to risk engines)")
     s.set_defaults(func=cmd_http_auth)
 
     s = sub.add_parser("keepalive", help="report whether the HTTP session is alive (for cron)")

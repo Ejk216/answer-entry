@@ -132,12 +132,15 @@ def full_login(page: "Page", url: str, email: str,
         page.locator('input[type="submit"], button[type="submit"]'
                      ).first.click()
         page.wait_for_timeout(4000)
-        if "unable to sign in" in page.locator("body").inner_text().lower():
+        body_text = page.locator("body").inner_text()
+        if "unable to sign in" in body_text.lower():
             return {"status": "bad-password",
-                    "detail": "Okta rejected the password. Re-store it with: "
-                    "security delete-generic-password -s answer-entry-msu && "
-                    "security add-generic-password -s answer-entry-msu "
-                    "-a '<msu-email>' -w"}
+                    "detail": "Okta rejected the password submit. Either "
+                    "the stored password is wrong or Okta is risk-blocking "
+                    "this automated context. Re-store with: security "
+                    "delete-generic-password -s answer-entry-msu && security "
+                    "add-generic-password -s answer-entry-msu -a "
+                    "'<msu-email>' -w. Page text: " + body_text[:400]}
         # 3. switch from the default (push) authenticator to SMS. If no
         # switch link appears, Okta may already be on code entry.
         switched = _click_text(page, SWITCH_TEXT, "challenge list",
