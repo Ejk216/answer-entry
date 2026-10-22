@@ -61,13 +61,24 @@ def page_state(page: "Page") -> dict[str, Any]:
             "buttons": buttons, "inputs": inputs, "text": text}
 
 
-def _fill(page: "Page", selectors: list[str], value: str, what: str) -> None:
+def _fill(page: "Page", selectors: list[str], value: str, what: str,
+          human: bool = False) -> None:
     for sel in selectors:
         loc = page.locator(sel).first
         try:
             loc.wait_for(state="visible", timeout=8000)
-            loc.fill(value)
+            if human:
+                # Trusted keystrokes for bot-sensitive fields; length-only
+                # read-back proves the fill landed without exposing it.
+                loc.click()
+                loc.press_sequentially(value, delay=12)
+                if not loc.input_value():
+                    raise ValueError(f"{what}: fill did not land")
+            else:
+                loc.fill(value)
             return
+        except ValueError:
+            raise
         except Exception:  # noqa: BLE001 — try the next selector
             continue
     raise ValueError(f"{what}: field not found")
@@ -104,11 +115,19 @@ def full_login(page: "Page", url: str, email: str,
             page.wait_for_timeout(2500)
         except ValueError:
             pass
-        # 2. password
+        # 2. password (human-like keystrokes; Okta is bot-sensitive)
         _fill(page, ['input[name="credentials.passcode"]',
-                     'input[type="password"]'], password, "password")
+                     'input[type="password"]'], password, "password",
+              human=True)
         page.locator('input[type="submit"], button[type="submit"]'
                      ).first.click()
+        page.wait_for_timeout(4000)
+        if "unable to sign in" in page.locator("body").inner_text().lower():
+            return {"status": "bad-password",
+                    "detail": "Okta rejected the password. Re-store it with: "
+                    "security delete-generic-password -s answer-entry-msu && "
+                    "security add-generic-password -s answer-entry-msu "
+                    "-a '<msu-email>' -w"}
         # 3. switch from the default (push) authenticator to SMS. If no
         # switch link appears, Okta may already be on code entry.
         switched = _click_text(page, SWITCH_TEXT, "challenge list",
@@ -117,8 +136,7 @@ def full_login(page: "Page", url: str, email: str,
             page.wait_for_timeout(2000)
             if not _click_text(page, SMS_TEXT, "SMS option",
                                timeout_ms=10000):
-                raise ValueError("SMS authenticator not offered; "
-                                 f"{page_state(page)}")
+                raise ValueError("SMS authenticator not offered")
             page.wait_for_timeout(2000)
             # Phone options sometimes ask voice-vs-SMS next.
             _click_text(page, SMS_TEXT, "SMS delivery",
@@ -137,8 +155,7 @@ def full_login(page: "Page", url: str, email: str,
         try:
             code_box.wait_for(state="visible", timeout=10000)
         except Exception:  # noqa: BLE001 — report the screen, don't wait blind
-            raise ValueError("no code entry showing after SMS choice; "
-                             f"{page_state(page)}")
+            raise ValueError("no code entry showing after SMS choice")
         # 5. enter the code from the Messages watcher
         try:
             code = sms.wait_for_code(mark, timeout_s=150)
