@@ -12,7 +12,7 @@ problem; every widget is read back and compared before anything submits.
 | Browser fill + read-back + submit + score | Validated live | 8-problem set, Oct 2026, first-try correct |
 | HTTP engine (fetch/parse/replay/submit) | Validated live | Local 8/8 + school HW07-FS26 9/9, ~1 min mechanical |
 | Set enumeration (HTTP) | Validated live | School set page, Oct 2026 |
-| Set status (HTTP) | Mock-tested | `http-status`; confirm row shape on a live set page |
+| Set status (HTTP) | Validated live | `http-status` on sim 2.19 set page, Oct 2026 |
 | Offline `validate` | Tested | Counts, option labels, checkbox shape |
 | Problem-text selectors (browser path) | **Unvalidated** | Candidate cascade; finalize via `probe` |
 | D2L dump + enter | Fixture-tested | Shadow-DOM traversal, Save All; needs live mapping check |

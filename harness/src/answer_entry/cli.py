@@ -468,7 +468,7 @@ def cmd_http_status(args: argparse.Namespace) -> int:
     engine = Engine()
     rows = http_engine.fetch_set_status(engine, args.set_url)
     for r in rows:
-        pct = f"{r['percent:g']}%" if r["percent"] is not None else "no score yet"
+        pct = f"{r['percent']:g}%" if r["percent"] is not None else "no score yet"
         print(f"problem {r['n']}: {pct}")
     full = sum(1 for r in rows if r["percent"] == 100)
     print(f"{full}/{len(rows)} at 100%")
