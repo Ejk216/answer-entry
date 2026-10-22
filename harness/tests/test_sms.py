@@ -13,10 +13,10 @@ def db(tmp_path):
     path = tmp_path / "chat.db"
     conn = sqlite3.connect(path)
     conn.execute("create table message (text TEXT, service TEXT, "
-                 "date INTEGER, is_from_me INTEGER)")
+                 "date INTEGER, is_from_me INTEGER, handle_id INTEGER)")
     conn.execute("insert into message values "
-                 "('Your verification code is 111111', 'SMS', 1, 0),"
-                 "('dinner at 7?', 'iMessage', 2, 0)")
+                 "('Your verification code is 111111', 'SMS', 1, 0, 7),"
+                 "('dinner at 7?', 'iMessage', 2, 0, 8)")
     conn.commit()
     conn.close()
     return path
@@ -24,7 +24,8 @@ def db(tmp_path):
 
 def add(db, text, service="SMS"):
     conn = sqlite3.connect(db)
-    conn.execute("insert into message values (?, ?, 3, 0)", (text, service))
+    conn.execute("insert into message values (?, ?, 3, 0, 9)",
+                 (text, service))
     conn.commit()
     conn.close()
 
@@ -64,7 +65,7 @@ def test_cli_fallback_when_module_blocked(db, monkeypatch):
     import subprocess
     mark = sms.latest_rowid(db_path=db)
     subprocess.run(["sqlite3", str(db), "insert into message values "
-                    "('Your verification code is 444444', 'SMS', 3, 0)"],
+                    "('Your verification code is 444444', 'SMS', 3, 0, 9)"],
                    check=True)
     assert sms.wait_for_code(mark, timeout_s=5, poll_s=0.1,
                              db_path=db) == "444444"

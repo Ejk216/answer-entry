@@ -122,7 +122,8 @@ def full_login(page: "Page", url: str, email: str,
         try:
             code = sms.wait_for_code(mark, timeout_s=150)
         except TimeoutError as e:
-            return {"status": "sms-timeout", "detail": str(e)}
+            return {"status": "sms-timeout",
+                    "detail": f"{e}; screen: {page_state(page)}"}
         _fill(page, ['input[autocomplete="one-time-code"]',
                      'input[inputmode="numeric"]',
                      'input[type="tel"]', 'input[type="text"]'],

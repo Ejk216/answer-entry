@@ -83,16 +83,21 @@ def wait_for_code(since_rowid: int, timeout_s: int = 150,
                   db_path: str | Path = CHAT_DB) -> str:
     """Newest verification code in SMS rows after since_rowid.
 
-    Raises TimeoutError when nothing arrives in time.
+    Raises TimeoutError when nothing arrives in time; the message says
+    how many new SMS were seen, splitting 'never sent' from 'no match'.
     """
     end = time.monotonic() + timeout_s
+    seen_handles: set[str] = set()
     while time.monotonic() < end:
         rows = _query(db_path,
-                      "select text from message "
+                      "select text, handle_id from message "
                       "where service='SMS' and ROWID > ? and is_from_me=0 "
                       "order by ROWID desc", (since_rowid,))
-        for (text,) in rows:
+        for text, handle in rows:
+            seen_handles.add(str(handle))
             if text and (code := extract_code(text)):
                 return code
         time.sleep(poll_s)
-    raise TimeoutError(f"no SMS verification code in {timeout_s}s")
+    raise TimeoutError(
+        f"no SMS verification code in {timeout_s}s "
+        f"({len(seen_handles)} new SMS from handles {sorted(seen_handles)})")
