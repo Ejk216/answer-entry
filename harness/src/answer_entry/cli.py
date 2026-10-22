@@ -4,7 +4,9 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import re
 import sys
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -251,21 +253,31 @@ def cmd_recon(args: argparse.Namespace) -> int:
     XHR/fetch request/response lands in JSONL for offline analysis."""
     log: list[dict] = []
 
+    # Auth endpoints carry passwords/tokens in the clear: log the URL and
+    # status, never the bodies. (Oct 2026: a recon run captured an MSU
+    # password from a login POST before this guard existed.)
+    sensitive = ("auth", "login", "signin", "token", "jwt", "password",
+                 "session", "sso", "oauth")
+
     def on_response(resp) -> None:
         try:
             req = resp.request
             if req.resource_type not in ("xhr", "fetch"):
                 return
             entry = {"method": req.method, "url": req.url,
-                     "status": resp.status,
-                     "request": (req.post_data or "")[:2000]}
-            try:
-                ctype = resp.headers.get("content-type", "")
-                body = resp.text()
-                entry["response"] = (body[:4000] if "json" in ctype
-                                     else f"<{ctype}, {len(body)} bytes>")
-            except Exception as e:  # noqa: BLE001 — log the failure, keep going
-                entry["response"] = f"<unreadable: {e}>"
+                     "status": resp.status}
+            if any(k in req.url.lower() for k in sensitive):
+                entry["request"] = "<redacted: auth endpoint>"
+                entry["response"] = "<redacted: auth endpoint>"
+            else:
+                entry["request"] = (req.post_data or "")[:2000]
+                try:
+                    ctype = resp.headers.get("content-type", "")
+                    body = resp.text()
+                    entry["response"] = (body[:4000] if "json" in ctype
+                                         else f"<{ctype}, {len(body)} bytes>")
+                except Exception as e:  # noqa: BLE001 — log the failure, keep going
+                    entry["response"] = f"<unreadable: {e}>"
             log.append(entry)
         except Exception:  # noqa: BLE001 — recon must never break browsing
             pass
@@ -327,6 +339,129 @@ def cmd_d2l_enter(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(report, indent=2))
     return 0 if report["status"] in ("ok", "dry_run_ok") else 1
+
+
+def cmd_th_auth(args: argparse.Namespace) -> int:
+    from . import tophat
+    with HarnessBrowser(headless=False) as b:
+        page = b.new_page()
+        page.goto(args.url)
+        print("Sign in, then press Enter here.")
+        try:
+            input()
+        except EOFError:
+            pass
+    tokens = tophat.read_tokens_from_profile()
+    exp = tophat.token_expiry(tokens["access"])
+    print(f"saved Top Hat JWT -> {tophat.TOKEN_FILE} "
+          f"(expires {time.strftime('%Y-%m-%d %H:%M', time.localtime(exp))})")
+    return 0
+
+
+def _th_client_with_course(urls: list[str], folder: str | None):
+    from . import tophat
+    if not urls:
+        raise ValueError("need at least one Top Hat URL (/e/<code>/...)")
+    client = tophat.Client()
+    course = client.course_id(tophat.public_code(urls[0]))
+    items: list[tuple[str, str]] = []  # (display, content id)
+    if folder:
+        tree = client.tree(course)
+        mappings = client.id_mappings(course)
+        for nid, name in tophat.enumerate_folder(tree, folder):
+            if nid in mappings:
+                items.append((name, mappings[nid]))
+        if not items:
+            raise ValueError(f"folder {folder!r}: no items bridge to content")
+    for u in urls:
+        m = re.search(r"/item/(\d+::[0-9a-f-]+)", u)
+        if m and all(cid != m.group(1) for _, cid in items):
+            items.append((m.group(1), m.group(1)))
+    if not items:
+        raise ValueError("no content items: pass item URLs and/or --folder")
+    return client, course, items
+
+
+def cmd_th_fetch(args: argparse.Namespace) -> int:
+    from . import tophat
+    client, course, items = _th_client_with_course(args.urls, args.folder)
+    print(f"course {course}, {len(items)} items")
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    dumps = []
+    failed = []
+    for n, (display, cid) in enumerate(items, 1):
+        try:
+            q = client.fetch_item(course, cid)
+        except ValueError as e:
+            failed.append((display, str(e)))
+            continue
+        (out / f"item-{n}.json").write_text(json.dumps(
+            {"cid": cid, "title": q.title, "stem": q.stem,
+             "options": q.options, "can_submit": q.can_submit,
+             "profile": q.profile}, indent=1))
+        text = q.stem + "\n" + "\n".join(
+            f"({o['id']}) {o['label']}" for o in q.options)
+        dumps.append({"n": n, "url": args.urls[0], "cid": cid,
+                      "title": q.title, "text": text,
+                      "blanks": [{"kind": "radio", "name": q.part,
+                                  "options": [{"label": o["label"],
+                                               "value": str(o["id"])}
+                                              for o in q.options]}],
+                      "images": []})
+        print(f"  [{n}] {q.title or display}: {len(q.options)} options")
+    (out / "problems.json").write_text(json.dumps(dumps, indent=2))
+    for display, e in failed:
+        print(f"  FAILED {display}: {e}")
+    print(f"fetched {len(dumps)}/{len(items)} -> {out / 'problems.json'}")
+    return 1 if failed else 0
+
+
+def cmd_th_enter(args: argparse.Namespace) -> int:
+    from . import tophat
+    answers = load_answers(args.answers)
+    problems = {p["n"]: p for p in
+                json.loads(Path(args.problems).read_text())}
+    client = tophat.Client()
+    course = client.course_id(tophat.public_code(answers.set_url or ""))
+    only = set(args.only) if args.only else None
+    reports = []
+    for p in answers.problems:
+        if only is not None and p.n not in only:
+            continue
+        dump = problems.get(p.n)
+        if dump is None or "cid" not in dump:
+            print(f"question {p.n}: no fetch dump; run th-fetch first")
+            break
+        if len(p.answers) != 1 or not isinstance(p.answers[0].value, str):
+            print(f"question {p.n}: want exactly 1 string answer")
+            break
+        r = tophat.enter_question(client, course, p.n, dump["cid"],
+                                  p.answers[0].value,
+                                  dry_run=args.dry_run)
+        reports.append(dataclasses.asdict(r))
+        print(f"question {p.n}: {r.status} — {r.detail}")
+        if r.status not in ("ok", "submitted", "dry_run_ok"):
+            print("stopping: nothing further submitted.", file=sys.stderr)
+            break
+    if args.json:
+        print(json.dumps(reports, indent=2))
+    bad = [r for r in reports if r["status"] not in ("ok", "dry_run_ok")]
+    return 1 if bad else 0
+
+
+def cmd_th_status(args: argparse.Namespace) -> int:
+    from . import tophat
+    client, course, items = _th_client_with_course(args.urls, args.folder)
+    done = client.answered(course)
+    by_cid = {cid: nid for nid, cid in
+              client.id_mappings(course).items()}
+    for n, (display, cid) in enumerate(items, 1):
+        nid = by_cid.get(cid)
+        mark = ("answered" if nid in done else "OPEN") if nid else "?"
+        print(f"  [{n}] {display}: {mark}")
+    print(f"course {course}: {len(done)} answered ids total")
+    return 0
 
 
 def cmd_http_status(args: argparse.Namespace) -> int:
@@ -430,6 +565,29 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--dry-run", action="store_true", help="plan clicks, make none")
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_d2l_enter)
+
+    s = sub.add_parser("th-auth", help="headed Top Hat sign-in, export JWT")
+    s.add_argument("url")
+    s.set_defaults(func=cmd_th_auth)
+
+    s = sub.add_parser("th-fetch", help="fetch Top Hat items (single-part MC)")
+    s.add_argument("urls", nargs="+", help="item URLs (any /e/<code>/ URL works)")
+    s.add_argument("--folder", default=None, help="course-tree folder title")
+    s.add_argument("--out", default="dumps/th-set", help="output directory")
+    s.set_defaults(func=cmd_th_fetch)
+
+    s = sub.add_parser("th-enter", help="Top Hat submit + instant grade (single-part MC)")
+    s.add_argument("answers")
+    s.add_argument("--problems", required=True, help="problems.json from th-fetch")
+    s.add_argument("--dry-run", action="store_true", help="resolve labels, never POST")
+    s.add_argument("--only", type=int, nargs="*", default=None)
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_th_enter)
+
+    s = sub.add_parser("th-status", help="answered? per Top Hat item")
+    s.add_argument("urls", nargs="+")
+    s.add_argument("--folder", default=None)
+    s.set_defaults(func=cmd_th_status)
 
     return p
 

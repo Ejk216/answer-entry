@@ -1,0 +1,129 @@
+{
+ "learning_material_data": {
+  "content_id": "1490555::aaa",
+  "type": "EMBEDDED",
+  "lineage_id": "cf7c2717-ac76-44a4-9948-c57dce537826",
+  "data": {
+   "item_details": {
+    "generic_item_data": {
+     "configuration": {
+      "1": {
+       "can_submit_question": true,
+       "correctness_strategy": "one",
+       "correctness_weight": 1,
+       "has_correct_answer": true,
+       "is_manually_graded": false,
+       "type": "multiple_choice_question"
+      }
+     },
+     "document": {
+      "children": [
+       {
+        "properties": {
+         "children": [
+          {
+           "properties": {
+            "formatting": [],
+            "value": "What is 2 + 2?"
+           },
+           "type": "text"
+          }
+         ]
+        },
+        "type": "paragraph"
+       },
+       {
+        "properties": {
+         "children": [
+          {
+           "properties": {
+            "children": [
+             {
+              "properties": {
+               "children": [
+                {
+                 "properties": {
+                  "formatting": [],
+                  "value": "3"
+                 },
+                 "type": "text"
+                }
+               ]
+              },
+              "type": "paragraph"
+             }
+            ],
+            "id": 1
+           },
+           "type": "multiple_choice_option"
+          },
+          {
+           "properties": {
+            "children": [
+             {
+              "properties": {
+               "children": [
+                {
+                 "properties": {
+                  "formatting": [],
+                  "value": "4"
+                 },
+                 "type": "text"
+                }
+               ]
+              },
+              "type": "paragraph"
+             }
+            ],
+            "id": 2
+           },
+           "type": "multiple_choice_option"
+          },
+          {
+           "properties": {
+            "children": [
+             {
+              "properties": {
+               "children": [
+                {
+                 "properties": {
+                  "formatting": [],
+                  "value": "5"
+                 },
+                 "type": "text"
+                }
+               ]
+              },
+              "type": "paragraph"
+             }
+            ],
+            "id": 3
+           },
+           "type": "multiple_choice_option"
+          }
+         ],
+         "id": 1
+        },
+        "type": "multiple_choice_question"
+       }
+      ],
+      "type": "EMBEDDED"
+     }
+    },
+    "module_id": "generic",
+    "profile": {
+     "correctness_score": 1,
+     "is_timed": true,
+     "participation_score": 0,
+     "question_submission_type": "manual",
+     "time_limit": 60
+    },
+    "title": "Sample Arithmetic",
+    "type": "advanced_question"
+   }
+  },
+  "children": [],
+  "hash": "04f05da25aac342526abeb8f1c82ab0e94abb1e16957cae3c51cbbc745bce3ea",
+  "marketplace_lm_id": null
+ }
+}

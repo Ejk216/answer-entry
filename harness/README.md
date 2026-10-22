@@ -16,7 +16,9 @@ problem; every widget is read back and compared before anything submits.
 | Offline `validate` | Tested | Counts, option labels, checkbox shape |
 | Problem-text selectors (browser path) | **Unvalidated** | Candidate cascade; finalize via `probe` |
 | D2L dump + enter | Fixture-tested | Shadow-DOM traversal, Save All; needs live mapping check |
-| Top Hat | Not built | Procedure in `references/`; roadmap |
+| Top Hat read path (JWT API) | Validated live | Open-assignment fetch; closed items 403 (by design) |
+| Top Hat submit | Shape-validated | POST shape from live traffic; driver run pending |
+| Top Hat recon hygiene | Done | Auth bodies redacted; creds never logged |
 
 ## HTTP engine (no browser)
 
@@ -86,6 +88,27 @@ uv run harness d2l-enter answers.json
 Fixture-tested only: the first live run must confirm the group→question
 mapping (compare already-answered groups against the navigator) before a
 full-quiz enter.
+
+## Top Hat (JWT API, no browser)
+
+Reverse-engineered from live app traffic (`harness recon`, Oct 2026).
+Bearer JWT + `Course-Id` header; the JWT lives in the profile's
+localStorage and is re-read (self-refreshing) whenever it nears expiry.
+Submit responses carry the grade (`graded_response` status + points).
+
+```bash
+uv run harness th-auth 'https://app.tophat.com/e/<code>/'   # headed sign-in, export JWT
+uv run harness th-fetch '<item-URL>' --folder '<folder>' --out dumps/th-set
+uv run harness validate answers.json --problems dumps/th-set/problems.json
+uv run harness th-enter answers.json --problems dumps/th-set/problems.json --only 1
+uv run harness th-enter answers.json --problems dumps/th-set/problems.json
+uv run harness th-status '<item-URL>' --folder '<folder>'
+```
+
+Scope: single-part multiple-choice; anything else raises. Only items in
+an **open** assignment fetch — closed items 403, which the driver
+reports plainly. `recon` redacts auth-endpoint bodies: credentials are
+never written to its log.
 
 ## Local WeBWorK 2.19 (1:1 test environment)
 
@@ -157,6 +180,7 @@ steps 1–3, useless for validating solving.
 - `src/answer_entry/webwork.py` — inventory, fill, read-back, submit, score
 - `src/answer_entry/http_engine.py` — fetch/parse/replay/submit/status, no browser
 - `src/answer_entry/d2l.py` — quiz dump/enter, Save All, never submits
+- `src/answer_entry/tophat.py` — JWT API client: tree, fetch, submit, status
 - `src/answer_entry/validate.py` — offline answers-vs-fetch check
 - `src/answer_entry/chunks.py` + `timing.py` — split/merge, phase timings
 - `src/answer_entry/cli.py` — all commands (see `harness -h`)
@@ -164,8 +188,8 @@ steps 1–3, useless for validating solving.
 
 ## Roadmap
 
-Top Hat driver; starts with live API recon (`harness recon <tophat-URL>`,
-drive the assignment, hand the JSONL back for analysis), which may replace
-browser entry entirely. D2L's group→question mapping still needs its live
+Top Hat: first live `th-enter` run; non-MC question types as their API
+shapes get captured; live-question watcher (needs in-class recon of the
+launch flow). D2L's group→question mapping still needs its live
 confirmation. No MCP wrapper planned — the workflow lives on web Claude,
 which MCP can't reach.
