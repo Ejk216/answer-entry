@@ -12,6 +12,7 @@ problem; every widget is read back and compared before anything submits.
 | Browser fill + read-back + submit + score | Validated live | 8-problem set, Oct 2026, first-try correct |
 | HTTP engine (fetch/parse/replay/submit) | Validated live | Local 8/8 + school HW07-FS26 9/9, ~1 min mechanical |
 | Set enumeration (HTTP) | Validated live | School set page, Oct 2026 |
+| Session auto-refresh | Live-tested (needs-you path) | `ok` path pending a Keep-signed-in login |
 | Set status (HTTP) | Validated live | `http-status` on sim 2.19 set page, Oct 2026 |
 | Offline `validate` | Tested | Counts, option labels, checkbox shape |
 | Problem-text selectors (browser path) | **Unvalidated** | Candidate cascade; finalize via `probe` |
@@ -45,6 +46,37 @@ uv run harness http-enter answers.json
 # Confirm per-problem scores on the set page
 uv run harness http-status https://host/webwork2/Course/Set/
 ```
+
+## Sessions (expiry, refresh, keep-alive)
+
+School sessions die after a few hours (Incapsula + SSO). Three layers:
+
+1. **Auto-refresh.** `http-fetch`/`http-enter`/`http-status` pre-flight
+   the session and, on expiry, redo the SSO dance headlessly with
+   profile cookies — no interaction while the school SSO session lives.
+2. **Manual refresh.** `harness http-auth --refresh <url>` does the same
+   on demand (retries visibly if headless hits the bot-wall).
+3. **Keep-alive.** `harness keepalive <url>` prints `alive` / `expired
+   (<kind>)` for a scheduler. Example launchd tick every 30 minutes:
+
+```xml
+<!-- ~/Library/LaunchAgents/edu.msu.webwork-keepalive.plist -->
+<dict>
+  <key>Label</key><string>edu.msu.webwork-keepalive</string>
+  <key>StartInterval</key><integer>1800</integer>
+  <key>ProgramArguments</key>
+  <array><string>/bin/sh</string><string>-c</string>
+    <string>cd ~/Developer/webwork-answer-entry/harness &&
+      uv run harness keepalive 'https://SET-URL' ||
+      uv run harness http-auth --refresh 'https://SET-URL'</string></array>
+</dict>
+```
+
+One user step makes refreshes reliable: at the next interactive
+`http-auth`, check **"Keep me signed in"** on the school login. That
+extends the SSO session for weeks, so the cookie-only dance heals
+every SP expiry without you. Without it, refresh correctly reports
+`needs-you` and you sign in again.
 
 ## Parallel solving
 

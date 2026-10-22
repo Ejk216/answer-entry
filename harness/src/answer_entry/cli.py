@@ -105,6 +105,13 @@ def cmd_enter(args: argparse.Namespace) -> int:
 
 
 def cmd_http_auth(args: argparse.Namespace) -> int:
+    if args.refresh:
+        result = refresh_auth(args.url, headed=False)
+        if result["status"] != "ok" and "bot-wall" in result.get("detail", ""):
+            print("headless hit the bot-wall; retrying visibly...")
+            result = refresh_auth(args.url, headed=True)
+        print(f"refresh: {result['status']} — {result['detail']}")
+        return 0 if result["status"] == "ok" else 1
     with HarnessBrowser(headless=False) as b:
         page = b.new_page()
         page.goto(args.url)
@@ -119,19 +126,96 @@ def cmd_http_auth(args: argparse.Namespace) -> int:
     engine = Engine(jar_path=jar)
     html = engine.get(args.url)
     print(f"saved {len(cookies)} cookies -> {jar}; verify GET: {len(html)} chars")
+    if "msu.edu" in args.url:
+        print("Tip: check 'Keep me signed in' on the school login — "
+              "it lets `http-auth --refresh` heal future expiries alone.")
     return 0
 
 
-def cmd_http_fetch(args: argparse.Namespace) -> int:
+def refresh_auth(url: str, headed: bool = False,
+                 timeout_s: int = 75) -> dict[str, str]:
+    """Redo the login dance with profile cookies alone — no typing, no user.
+
+    Works when the school SSO session is still alive (long-lived if 'Keep
+    me signed in' was checked). Returns {status, detail}; status is ok,
+    needs-you, or timeout.
+    """
+    end = time.time() + timeout_s
+    needs_hits = 0
+    with HarnessBrowser(headless=not headed) as b:
+        page = b.new_page()
+        page.goto(url)
+        while time.time() < end:
+            page.wait_for_timeout(3000)
+            state, reason = http_engine.classify_refresh_page(
+                page.url, page.content())
+            if state == "ready":
+                assert b.context is not None
+                n = len(b.context.cookies())
+                jar = http_engine.export_playwright_cookies(
+                    b.context.cookies())
+                probe = Engine(jar_path=jar).get(url)
+                if http_engine.auth_failure_kind(probe) is None:
+                    return {"status": "ok",
+                            "detail": f"session renewed ({n} cookies)"}
+                return {"status": "timeout",
+                        "detail": "browser looked ready but HTTP still fails"}
+            if state == "needs-you":
+                needs_hits += 1
+                if needs_hits >= 2:
+                    return {"status": "needs-you", "detail": reason}
+            else:
+                needs_hits = 0
+    return {"status": "timeout",
+            "detail": f"no app content after {timeout_s}s"}
+
+
+def prefetch_auth(url: str) -> Engine:
+    """Engine with a live session: auto-refresh once on expiry, else fail
+    with the exact user command. Call before any HTTP run."""
     engine = Engine()
+    try:
+        html = engine.get(url)
+    except Exception as e:  # noqa: BLE001 — network errors aren't auth errors
+        return engine
+    if http_engine.auth_failure_kind(html) is None:
+        return engine
+    print("session expired; attempting headless refresh...")
+    result = refresh_auth(url)
+    print(f"refresh: {result['status']} — {result['detail']}")
+    if result["status"] != "ok":
+        raise ValueError(
+            "session expired and auto-refresh needs you: run "
+            f"`harness http-auth '{url}'` (check 'Keep me signed in')")
+    return Engine()
+
+
+def cmd_keepalive(args: argparse.Namespace) -> int:
+    engine = Engine()
+    try:
+        html = engine.get(args.url)
+    except Exception as e:  # noqa: BLE001 — report, don't crash from cron
+        print(f"expired (fetch failed: {e})")
+        return 1
+    kind = http_engine.auth_failure_kind(html)
+    if kind is None:
+        print("alive")
+        return 0
+    print(f"expired ({kind})")
+    return 1
+
+
+def cmd_http_fetch(args: argparse.Namespace) -> int:
     tracker = Tracker()
     if args.answers.startswith("http"):
+        engine = prefetch_auth(args.answers)
         stubs = [{"n": n, "url": u}
                  for n, u in http_engine.enumerate_set(engine, args.answers)]
         print(f"enumerated {len(stubs)} problems from set page")
     else:
         answers = load_answers(args.answers)
         stubs = [{"n": p.n, "url": answers.problem_url(p)} for p in answers.problems]
+        engine = prefetch_auth(stubs[0]["url"])
     urls = [s["url"] for s in stubs]
     pages = engine.fetch_all(urls, workers=args.workers, tracker=tracker)
     out = Path(args.out)
@@ -176,7 +260,7 @@ def cmd_http_fetch(args: argparse.Namespace) -> int:
 def cmd_http_enter(args: argparse.Namespace) -> int:
     answers = load_answers(args.answers)
     only = set(args.only) if args.only else None
-    engine = Engine()
+    engine = prefetch_auth(answers.problem_url(answers.problems[0]))
     tracker = Tracker()
     reports = []
     for p in answers.problems:
@@ -465,7 +549,7 @@ def cmd_th_status(args: argparse.Namespace) -> int:
 
 
 def cmd_http_status(args: argparse.Namespace) -> int:
-    engine = Engine()
+    engine = prefetch_auth(args.set_url)
     rows = http_engine.fetch_set_status(engine, args.set_url)
     for r in rows:
         pct = f"{r['percent']:g}%" if r["percent"] is not None else "no score yet"
@@ -514,7 +598,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("http-auth", help="headed sign-in, then export cookies to the HTTP engine")
     s.add_argument("url")
+    s.add_argument("--refresh", action="store_true",
+                   help="cookie-only SSO re-dance, no interaction")
     s.set_defaults(func=cmd_http_auth)
+
+    s = sub.add_parser("keepalive", help="report whether the HTTP session is alive (for cron)")
+    s.add_argument("url")
+    s.set_defaults(func=cmd_keepalive)
 
     s = sub.add_parser("http-fetch", help="parallel HTTP fetch + parse from answers.json or a set URL")
     s.add_argument("answers", help="answers.json file or set page URL")

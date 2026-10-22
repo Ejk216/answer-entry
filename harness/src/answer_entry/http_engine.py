@@ -384,6 +384,50 @@ def fetch_set_status(engine: "Engine", set_url: str, tries: int = 3,
     raise ValueError(f"no problem status rows found at {set_url}")
 
 
+def auth_failure_kind(html: str) -> str | None:
+    """Why an HTTP fetch didn't yield app content, if auth is the reason.
+
+    - "incapsula": bot-wall stub (JS challenge, no content).
+    - "sso": diverted to the school's single-sign-on login.
+    - "login": plain WeBWorK login form.
+    None means no auth failure is visible (parse errors are something else).
+    """
+    if "_Incapsula_Resource" in html:
+        return "incapsula"
+    lowered = html.lower()
+    if ("auth.msu.edu" in lowered or "login.msu.edu" in lowered
+            or "okta" in lowered and "sign in" in lowered):
+        return "sso"
+    if 'id="login_form"' in html or 'name="passwd"' in html:
+        return "login"
+    return None
+
+
+def classify_refresh_page(url: str, html: str) -> tuple[str, str]:
+    """Refresh-dance state for a browser page: (state, reason).
+
+    - "ready": app content is showing (problem form or set rows).
+    - "needs-you": an interactive gate (SSO/Okta, password, 2FA, bot-wall).
+    - "loading": mid-dance transit; keep polling.
+    """
+    lowered = html.lower()
+    if "AnSwEr" in html or "Problem 1" in html:
+        return "ready", "app content showing"
+    if "_Incapsula_Resource" in html:
+        return "needs-you", "Incapsula bot-wall in the browser"
+    if 'type="password"' in lowered:
+        return "needs-you", "password field showing"
+    if "duosecurity" in lowered or "duo " in lowered and "push" in lowered:
+        return "needs-you", "2FA prompt showing"
+    if "auth.msu.edu" in url or "login.msu.edu" in url:
+        if "sign in" in lowered or "email" in lowered:
+            return "needs-you", "school SSO login showing"
+        return "loading", "SSO dance in transit"
+    if "sign in" in lowered and "okta" in lowered:
+        return "needs-you", "Okta login showing"
+    return "loading", "no app content yet"
+
+
 def strip_to_text(html: str) -> str:
     no_script = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
     return re.sub(r"\s+", " ",

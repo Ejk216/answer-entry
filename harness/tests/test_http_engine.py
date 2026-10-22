@@ -207,6 +207,28 @@ def test_parse_set_status_fixture():
                     {"n": 3, "percent": None}]
 
 
+def test_auth_failure_kind():
+    assert http_engine.auth_failure_kind(
+        '<script src="/_Incapsula_Resource?x">') == "incapsula"
+    assert http_engine.auth_failure_kind(
+        "<html>auth.msu.edu oauth sign in</html>") == "sso"
+    assert http_engine.auth_failure_kind(
+        '<form id="login_form"><input name="passwd">') == "login"
+    assert http_engine.auth_failure_kind(PROBLEM_HTML) is None
+
+
+def test_classify_refresh_page():
+    cls = http_engine.classify_refresh_page
+    assert cls("https://x/set/1", PROBLEM_HTML)[0] == "ready"
+    assert cls("https://x/set/", "<html>Problem 1 100%</html>")[0] == "ready"
+    assert cls("https://auth.msu.edu/x", "<html>Sign In Email</html>") == (
+        "needs-you", "school SSO login showing")
+    assert cls("https://auth.msu.edu/x", "<html>loading</html>")[0] == "loading"
+    assert cls("https://x/", '<input type="password">')[0] == "needs-you"
+    assert cls("https://x/", "Duo Push to your phone")[0] == "needs-you"
+    assert cls("https://x/", "<html>nothing yet</html>")[0] == "loading"
+
+
 def test_fetch_set_status(server, engine):
     rows = http_engine.fetch_set_status(engine, f"{server}/course/set/")
     assert rows == [{"n": 1, "percent": 100.0},
