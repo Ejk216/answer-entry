@@ -201,8 +201,28 @@ uv run harness run status
 uv run harness watch --ww-course 'https://host/webwork2/Course/' --th-code 904581 --notify
 ```
 
-Runs are WeBWorK-only; Top Hat/D2L stages, the approval page, and the
-API solver land next, in that order.
+Runs are WeBWorK-only; Top Hat/D2L stages and the approval page land
+next.
+
+## API solver (`run solve`)
+
+`run solve` proposes answers via an LLM (figures attached as images),
+writes `answers.json` + `work.md`, and holds low-confidence problems
+for a human. It never submits — `run answers` stays the only path to
+entry, guarded by validate + canary + graded verification.
+
+```bash
+security add-generic-password -s meta-model-api-key -a me -w  # once
+uv run harness run solve --run dumps/runs/<set>                # Meta default
+uv run harness run solve --run dumps/runs/<set> --provider anthropic
+```
+
+Default backend: Meta Model API (`muse-spark-1.3-contributor`,
+Bearer auth, Anthropic-compatible `/v1/messages`). Contributor
+pricing (~$0.10/$0.20 per MTok) means Meta trains on prompts and
+completions — that tradeoff is the user's explicit choice. Fetched
+`current` values are stripped before solving (the model must solve,
+not copy). Worst-case cost is refused up front against `--max-usd`.
 
 ## Local WeBWorK 2.19 (1:1 test environment)
 

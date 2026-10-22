@@ -365,7 +365,65 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 2
         args.answers = args.target
         return cmd_run_answers(args)
+    if args.action == "solve":
+        return cmd_run_solve(args)
     return cmd_run_status(args)
+
+
+def cmd_run_solve(args: argparse.Namespace) -> int:
+    from . import runs, solver
+    run_dir = _run_dir(args.run)
+    state = runs.load_state(run_dir)
+    if state["platform"] != "webwork":
+        print("error: solve is WeBWorK-only for now", file=sys.stderr)
+        return 2
+    service = (solver.META_KEYCHAIN_SERVICE if args.provider == "meta"
+               else solver.KEYCHAIN_SERVICE)
+    try:
+        key = solver.keychain_key(service)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    if args.provider == "meta":
+        model = args.model or solver.META_DEFAULT_MODEL
+        provider = solver.meta_provider(key, model)
+    else:
+        model = args.model or solver.DEFAULT_MODEL
+        provider = solver.Provider(api_key=key, model=model)
+    problems = json.loads(Path(state["problems"]).read_text())
+    print(f"solving {len(problems)} problems with {model} "
+          f"(cap ${args.max_usd:.2f})...")
+    try:
+        result = solver.solve_problems(
+            provider, problems,
+            solver.Policy(max_usd=args.max_usd,
+                          max_tokens=args.max_tokens),
+            base_dir=run_dir)
+    except ValueError as e:
+        print(f"solve failed: {e}", file=sys.stderr)
+        return 1
+    answers_path = run_dir / "answers.json"
+    answers_path.write_text(json.dumps(
+        {"set_url": state["set_url"], "problems": result.problems}, indent=1))
+    (run_dir / "work.md").write_text("\n\n".join(
+        f"## Problem {w['n']} ({w['confidence']})\n{w['work']}"
+        for w in result.work) + "\n")
+    state["answers"] = str(answers_path)
+    state["stage"] = "solved"
+    state["solve"] = {"model": result.model, "cost_usd": result.cost_usd,
+                      "tokens": [result.input_tokens, result.output_tokens],
+                      "held": result.held}
+    runs.save_state(run_dir, state)
+    print(f"solved in {result.input_tokens}+{result.output_tokens} tokens, "
+          f"${result.cost_usd:.4f}")
+    if result.held:
+        print(f"HELD for human review (low confidence): {result.held}")
+        print(f"review {answers_path}, fix held problems, then: "
+              f"harness run answers {answers_path} --run {run_dir}")
+        return 1
+    print(f"proposed {answers_path}; review, then: harness run answers "
+          f"{answers_path} --run {run_dir}")
+    return 0
 
 
 def cmd_run_status(args: argparse.Namespace) -> int:
@@ -904,13 +962,21 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_smoke)
 
     s = sub.add_parser("run", help="resumable homework run (fetch, answers, enter, verify)")
-    s.add_argument("action", choices=["start", "answers", "status"])
+    s.add_argument("action", choices=["start", "answers", "status", "solve"])
     s.add_argument("target", nargs="?",
                    help="start: set URL; answers: answers.json; status: nothing")
     s.add_argument("--run", default=None, help="run directory")
     s.add_argument("--out", default=None, help="start: run directory")
     s.add_argument("--workers", type=int, default=2)
     s.add_argument("--dry-run", action="store_true")
+    s.add_argument("--provider", default="meta",
+                   choices=["meta", "anthropic"], help="solve: LLM backend")
+    s.add_argument("--model", default=None,
+                   help="solve: model id (provider default if omitted)")
+    s.add_argument("--max-usd", type=float, default=2.0,
+                   help="solve: spend cap")
+    s.add_argument("--max-tokens", type=int, default=8000,
+                   help="solve: output cap")
     s.set_defaults(func=cmd_run)
 
     s = sub.add_parser("watch", help="what's due and what's done (WW + Top Hat)")

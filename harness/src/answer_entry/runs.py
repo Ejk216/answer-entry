@@ -8,6 +8,7 @@ set: problem 1 must grade clean before anything else submits.
 from __future__ import annotations
 
 import json
+import urllib.parse
 from pathlib import Path
 from typing import Any, Callable
 
@@ -62,8 +63,8 @@ def advance_run(run_dir: str | Path, answers_path: str,
     """Validate -> canary -> enter -> verify. Skips problems already ok."""
     run_dir = Path(run_dir)
     state = load_state(run_dir)
-    if state["stage"] not in ("awaiting-answers", "entering", "failed",
-                              "validated"):
+    if state["stage"] not in ("awaiting-answers", "solved", "entering",
+                              "failed", "validated"):
         return state
     state["answers"] = answers_path
     try:
@@ -162,6 +163,20 @@ class WWIO:
             (run_dir / f"problem-{n}.html").write_text(pages[url])
             dumps.append({"n": n, "url": url, "text": parsed.text,
                           "blanks": parsed.blanks, "images": parsed.images})
+        figdir = run_dir / "figures"
+        for d in dumps:
+            local: list[str] = []
+            for i, src in enumerate(d["images"]):
+                try:
+                    ext = Path(urllib.parse.urlparse(src).path).suffix or ".img"
+                    name = f"p{d['n']}-{i}{ext}"
+                    figdir.mkdir(exist_ok=True)
+                    (figdir / name).write_bytes(
+                        self.engine.get_bytes(src))
+                    local.append(f"figures/{name}")
+                except Exception:  # noqa: BLE001 — figures are best effort
+                    continue
+            d["figures"] = local
         out = run_dir / "problems.json"
         out.write_text(json.dumps(dumps, indent=2))
         return str(out)
