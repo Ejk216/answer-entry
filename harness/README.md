@@ -13,6 +13,8 @@ problem; every widget is read back and compared before anything submits.
 | HTTP engine (fetch/parse/replay/submit) | Validated live | Local 8/8 + school HW07-FS26 9/9, ~1 min mechanical |
 | Set enumeration (HTTP) | Validated live | School set page, Oct 2026 |
 | Unattended Okta+SMS login | Validated live | Full `--full` chain green, Oct 2026 |
+| Run orchestrator | Live to `validated` | Full entry path unit-tested; live run on next set |
+| Due watcher | Validated live | WW 8 sets + TH dues (0 currently), Oct 2026 |
 | Cookie-only refresh | Live-tested (needs-you path) | `ok` path triggers on next SP-only expiry |
 | Set status (HTTP) | Validated live | `http-status` on sim 2.19 set page, Oct 2026 |
 | Offline `validate` | Tested | Counts, option labels, checkbox shape |
@@ -179,6 +181,29 @@ an **open** assignment fetch — closed items 403, which the driver
 reports plainly. `recon` redacts auth-endpoint bodies: credentials are
 never written to its log.
 
+## Runs and watch (autopilot foundation)
+
+`run` collapses a set to two commands with resumable state
+(`dumps/runs/<set>/run.json`): fetch, then validate → canary →
+enter → verify. Interrupted runs resume without re-entering graded
+problems; the canary gates the set.
+
+```bash
+uv run harness run start 'https://host/webwork2/Course/Set/'
+uv run harness run answers answers.json --dry-run   # validate only
+uv run harness run answers answers.json
+uv run harness run status
+```
+
+`watch` reports what's due and done across platforms (read-only):
+
+```bash
+uv run harness watch --ww-course 'https://host/webwork2/Course/' --th-code 904581 --notify
+```
+
+Runs are WeBWorK-only; Top Hat/D2L stages, the approval page, and the
+API solver land next, in that order.
+
 ## Local WeBWorK 2.19 (1:1 test environment)
 
 Real server, same version as the school, running in Docker one directory over
@@ -251,6 +276,7 @@ steps 1–3, useless for validating solving.
 - `src/answer_entry/d2l.py` — quiz dump/enter, Save All, never submits
 - `src/answer_entry/tophat.py` — JWT API client: tree, fetch, submit, status
 - `src/answer_entry/okta.py` + `sms.py` — unattended Okta+SMS login
+- `src/answer_entry/runs.py` + `course.py` — orchestrator, sets/due scan
 - `src/answer_entry/validate.py` — offline answers-vs-fetch check
 - `src/answer_entry/chunks.py` + `timing.py` — split/merge, phase timings
 - `src/answer_entry/cli.py` — all commands (see `harness -h`)

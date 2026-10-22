@@ -133,6 +133,18 @@ def test_enumerate_folder():
         enumerate_folder(TREE, "Missing")
 
 
+def test_build_due_report():
+    dues = [{"module_item_id": 111, "date": "2026-10-22T03:59:00"},
+            {"module_item_id": 222, "date": "2026-10-29T03:59:00"}]
+    rows = tophat.build_due_report(TREE, dues, {111})
+    assert rows == [{"title": "Top Hat 6", "due": "2026-10-22T03:59:00",
+                     "total": 2, "answered": 1,
+                     "open": ["Second Question"], "done": False}]
+    assert tophat.build_due_report(TREE, [], set()) == []
+    full = tophat.build_due_report(TREE, dues, {111, 222})
+    assert full[0]["done"] is True and full[0]["open"] == []
+
+
 def test_id_mappings(client):
     assert client.id_mappings("1157914") == {111: "1490555::aaa",
                                              222: "1490555::bbb"}

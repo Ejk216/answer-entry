@@ -9,6 +9,7 @@ import sys
 import time
 import urllib.parse
 from pathlib import Path
+from typing import Any
 
 from . import chunks, http_engine, webwork
 from .browser import HARNESS_ROOT, PROFILE_DIR, HarnessBrowser
@@ -298,6 +299,137 @@ def run_smoke(checks: list[tuple[str, object]]) -> list[dict[str, object]]:
             ok, detail = False, f"{type(e).__name__}: {e}"
         results.append({"name": name, "ok": bool(ok), "detail": str(detail)})
     return results
+
+
+def _run_dir(explicit: str | None) -> Path:
+    if explicit:
+        return Path(explicit)
+    runs = sorted(Path("dumps/runs").glob("*/run.json"),
+                  key=lambda p: p.stat().st_mtime)
+    if not runs:
+        raise ValueError("no runs yet; `run start` one first")
+    chosen = runs[-1].parent
+    print(f"using latest run: {chosen}")
+    return chosen
+
+
+def cmd_run_start(args: argparse.Namespace) -> int:
+    from . import runs
+    url = args.set_url
+    if "tophat.com" in url or "d2l" in url:
+        print("error: runs are WeBWorK-only for now (Top Hat/D2L next)",
+              file=sys.stderr)
+        return 2
+    engine = prefetch_auth(url)
+    run_dir = Path(args.out) if args.out else Path("dumps/runs") / runs.slug(url)
+    state = runs.start_run(run_dir, "webwork", url,
+                           runs.WWIO(engine, args.workers).fetch)
+    if state["stage"] == "failed":
+        print(f"fetch failed: {state['error']}", file=sys.stderr)
+        return 1
+    n = len(json.loads(Path(state["problems"]).read_text()))
+    print(f"fetched {n} problems -> {state['problems']}")
+    print(f"solve, save answers.json, then: harness run answers "
+          f"answers.json --run {run_dir}")
+    return 0
+
+
+def cmd_run_answers(args: argparse.Namespace) -> int:
+    from . import runs
+    run_dir = _run_dir(args.run)
+    state = runs.load_state(run_dir)
+    engine = prefetch_auth(state["set_url"])
+    state = runs.advance_run(run_dir, args.answers,
+                             runs.WWIO(engine, args.workers),
+                             dry_run=args.dry_run)
+    for n, status in sorted(state["entered"].items(), key=lambda kv: int(kv[0])):
+        print(f"problem {n}: {status}")
+    if state.get("validation", {}).get("warnings"):
+        for w in state["validation"]["warnings"]:
+            print(f"warning: {w}")
+    print(f"stage: {state['stage']}" +
+          (f" — {state['error']}" if state.get("error") else ""))
+    return 0 if state["stage"] in ("done", "validated") else 1
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    if args.action == "start":
+        if not args.target:
+            print("error: run start needs a set URL", file=sys.stderr)
+            return 2
+        args.set_url = args.target
+        return cmd_run_start(args)
+    if args.action == "answers":
+        if not args.target:
+            print("error: run answers needs answers.json", file=sys.stderr)
+            return 2
+        args.answers = args.target
+        return cmd_run_answers(args)
+    return cmd_run_status(args)
+
+
+def cmd_run_status(args: argparse.Namespace) -> int:
+    from . import runs
+    run_dir = _run_dir(args.run)
+    state = runs.load_state(run_dir)
+    print(f"run: {run_dir} ({state['platform']})")
+    print(f"set: {state['set_url']}")
+    print(f"stage: {state['stage']}")
+    if state["entered"]:
+        print("entered: " + ", ".join(
+            f"{n}={s}" for n, s in sorted(state["entered"].items(),
+                                          key=lambda kv: int(kv[0]))))
+    if state.get("error"):
+        print(f"error: {state['error']}")
+    if state.get("verify"):
+        full = sum(1 for r in state["verify"] if r.get("percent") == 100)
+        print(f"verify: {full}/{len(state['verify'])} at 100%")
+    return 0
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    import subprocess as _subprocess
+    report: dict[str, Any] = {"webwork": [], "tophat": []}
+    if args.ww_course:
+        from . import course
+        engine = prefetch_auth(args.ww_course)
+        for s in course.due_scan(engine, args.ww_course):
+            s["due"] = s["due"].isoformat() if s["due"] else None
+            report["webwork"].append(s)
+            mark = "DONE" if s["done"] else f"{s['at_100']}/{s['total']}"
+            print(f"[WW] {s['name']}: {mark} · due {s['due_raw'] or '?'}")
+    if args.th_code:
+        from . import tophat
+        client = tophat.Client()
+        course_id = client.course_id(args.th_code)
+        rows = tophat.build_due_report(
+            client.tree(course_id), client.due_dates(course_id),
+            client.answered(course_id))
+        report["tophat"] = rows
+        for r in rows:
+            mark = "DONE" if r["done"] else f"{r['answered']}/{r['total']}"
+            print(f"[TH] {r['title']}: {mark} · due {r['due']}")
+    out = Path("dumps/watch.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=1, default=str))
+    if args.notify:
+        lines = []
+        for s in report["webwork"]:
+            if not s["done"]:
+                lines.append(f"{s['name']} {s['at_100']}/{s['total']}")
+        for r in report["tophat"]:
+            if not r["done"]:
+                lines.append(f"{r['title']} {r['answered']}/{r['total']}")
+        if lines:
+            try:
+                _subprocess.run(
+                    ["osascript", "-e",
+                     'display notification "' + "; ".join(lines[:5]) +
+                     '" with title "homework open"'], timeout=15,
+                    capture_output=True)
+            except Exception:  # noqa: BLE001 — notification is a courtesy
+                pass
+    return 0
 
 
 def cmd_smoke(args: argparse.Namespace) -> int:
@@ -770,6 +902,22 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--ww-url", default="skip", help="WeBWorK page to probe")
     s.add_argument("--th-code", default=None, help="Top Hat public code")
     s.set_defaults(func=cmd_smoke)
+
+    s = sub.add_parser("run", help="resumable homework run (fetch, answers, enter, verify)")
+    s.add_argument("action", choices=["start", "answers", "status"])
+    s.add_argument("target", nargs="?",
+                   help="start: set URL; answers: answers.json; status: nothing")
+    s.add_argument("--run", default=None, help="run directory")
+    s.add_argument("--out", default=None, help="start: run directory")
+    s.add_argument("--workers", type=int, default=2)
+    s.add_argument("--dry-run", action="store_true")
+    s.set_defaults(func=cmd_run)
+
+    s = sub.add_parser("watch", help="what's due and what's done (WW + Top Hat)")
+    s.add_argument("--ww-course", default=None, help="WeBWorK course URL")
+    s.add_argument("--th-code", default=None, help="Top Hat public code")
+    s.add_argument("--notify", action="store_true", help="notify if work is open")
+    s.set_defaults(func=cmd_watch)
 
     s = sub.add_parser("http-fetch", help="parallel HTTP fetch + parse from answers.json or a set URL")
     s.add_argument("answers", help="answers.json file or set page URL")

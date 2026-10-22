@@ -137,6 +137,27 @@ def parse_content(cid: str, body: dict[str, Any]) -> Question:
                     profile=details.get("profile", {}))
 
 
+def folders(tree: dict[str, Any]) -> dict[str, list[tuple[int, str]]]:
+    """Every folder title -> [(numeric id, display name)] beneath it."""
+    out: dict[str, list[tuple[int, str]]] = {}
+
+    def walk(node: dict[str, Any], path: list[str]) -> None:
+        if node.get("item_type") == "module_item_folder":
+            path = path + [node.get("title", "")]
+            out.setdefault(path[-1], [])
+        elif (node.get("item_type") == "module_item"
+                and str(node.get("id", "")).isdigit()):
+            for title in path:
+                out.setdefault(title, []).append(
+                    (int(node["id"]),
+                     node.get("display_name") or node.get("title") or ""))
+        for child in node.get("children", []):
+            walk(child, path)
+
+    walk(tree, [])
+    return out
+
+
 def enumerate_folder(tree: dict[str, Any],
                      folder: str) -> list[tuple[int, str]]:
     """(numeric id, display name) for module_items under a folder title.
@@ -144,30 +165,40 @@ def enumerate_folder(tree: dict[str, Any],
     Exact title match first, then case-insensitive substring; anything
     else errors with the available folder list.
     """
-    folders: dict[str, list[tuple[int, str]]] = {}
-
-    def walk(node: dict[str, Any], path: list[str]) -> None:
-        if node.get("item_type") == "module_item_folder":
-            path = path + [node.get("title", "")]
-            folders.setdefault(path[-1], [])
-        elif (node.get("item_type") == "module_item"
-                and str(node.get("id", "")).isdigit()):
-            for title in path:
-                folders.setdefault(title, []).append(
-                    (int(node["id"]),
-                     node.get("display_name") or node.get("title") or ""))
-        for child in node.get("children", []):
-            walk(child, path)
-
-    walk(tree, [])
-    if folder in folders:
-        return folders[folder]
-    sub = [t for t in folders if folder.lower() in t.lower()]
+    found = folders(tree)
+    if folder in found:
+        return found[folder]
+    sub = [t for t in found if folder.lower() in t.lower()]
     if len(sub) == 1:
-        return folders[sub[0]]
+        return found[sub[0]]
     raise ValueError(f"no folder {folder!r}" +
-                     (f" (have {sorted(folders)})" if folders
+                     (f" (have {sorted(found)})" if found
                       else " (tree holds no folders)"))
+
+
+def build_due_report(tree: dict[str, Any], dues: list[dict[str, Any]],
+                     answered: set[int]) -> list[dict[str, Any]]:
+    """Per-folder due rows: earliest due, totals, open item names.
+
+    dues: student_available_due_dates rows ({module_item_id, date});
+    answered: answered numeric ids. Folders without dated items are
+    omitted (undated folders are lecture history, not homework).
+    """
+    by_id = {d["module_item_id"]: d["date"] for d in dues}
+    report = []
+    for title, items in folders(tree).items():
+        dated = [(nid, name) for nid, name in items if nid in by_id]
+        if not dated:
+            continue
+        open_items = [(nid, name) for nid, name in dated
+                      if nid not in answered]
+        report.append({"title": title,
+                       "due": min(by_id[nid] for nid, _ in dated),
+                       "total": len(dated),
+                       "answered": len(dated) - len(open_items),
+                       "open": [name for _, name in open_items],
+                       "done": not open_items})
+    return sorted(report, key=lambda r: r["due"])
 
 
 class Client:
@@ -252,6 +283,12 @@ class Client:
         body = self._request(
             "GET", f"/api/v2/answered_items/{course}/", course)
         return set(body.get("question", [])) | set(body.get("generic", []))
+
+    def due_dates(self, course: str) -> list[dict[str, Any]]:
+        body = self._request(
+            "GET", f"/api/v3/course/{course}/student_available_due_dates/",
+            course)
+        return body if isinstance(body, list) else []
 
 
 def public_code(public_url: str) -> str:

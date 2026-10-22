@@ -81,16 +81,17 @@ chat prose for the user to retype.
 - Checkbox: a list of labels plus `"type": "checkbox"`.
 - `set_url` may replace per-problem `url`s.
 
-Commands for the user (from `harness/`):
+Commands for the user (from `harness/`) — or one orchestrated run:
 
 ```bash
-uv run harness validate answers.json --problems dumps/<SET>/problems.json
-uv run harness http-enter answers.json --only 1   # canary, then the set
-uv run harness http-enter answers.json
-uv run harness http-status '<set-URL>'            # final verification
+uv run harness run start '<set-URL>'              # fetch, wait for answers
+uv run harness run answers answers.json           # validate, canary, enter, verify
+uv run harness run status                         # stage + per-problem state
 ```
 
-If `validate` reports errors, fix the answers file — don't proceed to entry.
+The manual equivalents are `validate`, `http-enter --only 1`,
+`http-enter`, `http-status`. If `validate` reports errors, fix the
+answers file — don't proceed to entry.
 
 School sessions expire after a few hours; commands detect it and try a
 headless refresh on their own, then one unattended Okta+SMS login when
